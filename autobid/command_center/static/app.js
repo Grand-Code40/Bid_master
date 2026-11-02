@@ -17,6 +17,7 @@ const messages = {
 };
 let state=null, online=false, stopped=false, loading=false, epoch=0, view="all";
 let selectedKey=null, editorReview=null, editorBusy=false, remoteChanged=false;
+let editorSession=0, preparing=false;
 let monitorSaving=false, monitorError="", listSignature="", sourceSignature="";
 let editorMessage="", editorError=false;
 function el(tag, cls, text) {
@@ -27,6 +28,7 @@ function el(tag, cls, text) {
 }
 function icon(name) {
   const paths={
+    close:"M6 6l12 12M6 18 18 6",
     edit:"M13 5l6 6M4 20l4-1L20 7a2 2 0 0 0-3-3L5 16l-1 4Z",
     arrow:"M6 18 18 6M6 6h12v12",
     search:"M21 21l-5-5M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0",
@@ -104,6 +106,7 @@ function renderListings() {
   }
   for(const item of items) {
     const row=el("article","listing"+(selectedKey===key(item)?" is-selected":""));
+    row.dataset.listingKey=key(item);
     const top=el("div","listing-top");
     const sourceName=el("span","source-label",names[item.source_id]||item.source_id);
     sourceName.prepend(icon("globe"));
@@ -116,8 +119,8 @@ function renderListings() {
     const review=reviewFor(item);
     if(review)bottom.append(el("span","listing-state state-"+review.state,labels[review.state]));
     if(item.availability==="closed")bottom.append(el("span","muted","Закрыт"));
-    const action=el("button","listing-action",review?"Открыть отклик":item.listing_kind==="order"&&item.availability!=="closed"?"Подготовить отклик":"Подробнее");
-    action.prepend(icon(review?"arrow":"edit"));
+    const action=el("button","listing-action","Ответить");
+    action.prepend(icon("edit"));
     action.type="button"; action.addEventListener("click",()=>openItem(item));
     bottom.append(action);
     const copy=el("div","listing-copy");
@@ -138,18 +141,25 @@ async function openItem(item) {
     return;
   }
   if(selectedKey!==key(item)&&dirty()&&!window.confirm("Несохранённые правки будут потеряны. Открыть другой заказ?"))return;
-  selectedKey=key(item); editorReview=reviewFor(item)||null; remoteChanged=false; editorMessage="";
+  const session=++editorSession;
+  selectedKey=key(item); editorReview=reviewFor(item)||null; remoteChanged=false; editorMessage=""; editorError=false;
   $("#reply-text").value=editorReview?.text||"";
-  $("#workspace").classList.add("has-selection"); $("#editor-panel").hidden=false;
   renderDetails(item); renderListings(); renderEditor();
-  if(!editorReview&&item.listing_kind==="order"&&item.availability!=="closed"&&link(item.canonical_url)) {
-    editorBusy=true;renderEditor();
-    try { acceptReview(await mutate("/api/review/prepare",{source_id:item.source_id,external_id:item.external_id})); }
-    catch(error) { editorMessage=error.message;editorError=true; }
-    finally { editorBusy=false;renderEditor();renderListings(); }
-  }
+  if(!$("#editor-panel").open)$("#editor-panel").showModal();
+  document.body.classList.add("dialog-open");
+  $("#editor-panel .editor-scroll").scrollTop=0;
   $("#details-title").focus({preventScroll:true});
-  if(window.matchMedia("(max-width: 760px)").matches)$("#editor-panel").scrollIntoView({block:"start",behavior:"instant"});
+  if(!editorReview&&item.listing_kind==="order"&&item.availability!=="closed"&&link(item.canonical_url)) {
+    editorBusy=true;preparing=true;renderEditor();
+    try {
+      const row=await mutate("/api/review/prepare",{source_id:item.source_id,external_id:item.external_id});
+      if(session===editorSession)acceptReview(row);
+    } catch(error) {
+      if(session===editorSession) { editorMessage=error.message;editorError=true; }
+    } finally {
+      if(session===editorSession) { editorBusy=false;preparing=false;renderEditor();renderListings(); }
+    }
+  }
 }
 function renderDetails(item) {
   $("#details-source").textContent=(names[item.source_id]||item.source_id)+(item.listing_kind==="vacancy"?" · Вакансия":" · Заказ");
@@ -167,8 +177,12 @@ function renderEditor() {
   const item=selectedItem();
   const available=item?.listing_kind==="order"&&item.availability!=="closed"&&link(item.canonical_url);
   $("#reply-area").hidden=!available&&!editorReview;
-  $("#reply-unavailable").hidden=Boolean(available||editorReview);
+  $("#reply-unavailable").hidden=Boolean(available);
+  $("#reply-unavailable").textContent=item?.availability==="closed"?
+    "Заказ уже закрыт. Описание и сохранённый отклик доступны, отправка отключена.":
+    "Отклики доступны для заказов. Это объявление можно посмотреть на площадке.";
   const row=editorReview, editable=row&&["draft","approved"].includes(row.state);
+  $("#editor-panel .editor-footer").hidden=!row;
   const canAct=Boolean(row&&online&&!stopped&&!editorBusy&&!remoteChanged);
   const changed=dirty();
   $("#reply-text").disabled=!row;
@@ -202,16 +216,27 @@ function renderEditor() {
 }
 async function act(action) {
   if(editorBusy||!editorReview||remoteChanged)return;
+  const session=editorSession;
   editorBusy=true; editorMessage=""; editorError=false;renderEditor();
   const identity={source_id:editorReview.source_id,external_id:editorReview.external_id};
   try {
     if(action==="save"||action==="approve"&&dirty()) {
-      acceptReview(await mutate("/api/review/save",{...identity,revision:editorReview.revision,text:$("#reply-text").value}));
+      const row=await mutate("/api/review/save",{...identity,revision:editorReview.revision,text:$("#reply-text").value});
+      if(session!==editorSession)return;
+      acceptReview(row);
     }
-    if(action!=="save")acceptReview(await mutate("/api/review/"+action,{...identity,revision:editorReview.revision}));
+    if(action!=="save") {
+      const row=await mutate("/api/review/"+action,{...identity,revision:editorReview.revision});
+      if(session!==editorSession)return;
+      acceptReview(row);
+    }
     if(action==="queue")editorMessage="Отклик поставлен в очередь. Отправка будет подтверждена отдельно.";
-  } catch(error) { editorMessage=error.message;editorError=true; }
-  finally { editorBusy=false;renderEditor();renderListings();await refresh(); }
+  } catch(error) {
+    if(session===editorSession) { editorMessage=error.message;editorError=true; }
+  } finally {
+    if(session===editorSession) { editorBusy=false;renderEditor();renderListings(); }
+    await refresh();
+  }
 }
 function renderSources() {
   const signature=JSON.stringify(state.sources);
@@ -297,10 +322,28 @@ $("#reload-reply").addEventListener("click",()=>{
   if(row)acceptReview(row);
   setMessage();
 });
-$("#close-details").addEventListener("click",()=>{
-  if(editorBusy||dirty()&&!window.confirm("Несохранённые правки будут потеряны. Закрыть отклик?"))return;
-  selectedKey=null;editorReview=null;$("#editor-panel").hidden=true;$("#workspace").classList.remove("has-selection");renderListings();
-  $("#search").focus({preventScroll:true});
+function closeEditor() {
+  const warning=editorBusy&&!preparing?
+    "Действие ещё выполняется. Закрыть окно? Уже отправленный запрос продолжит выполняться.":
+    dirty()?"Несохранённые правки будут потеряны. Закрыть отклик?":"";
+  if(warning&&!window.confirm(warning))return;
+  const previousKey=selectedKey;
+  ++editorSession;preparing=false;editorBusy=false;selectedKey=null;editorReview=null;remoteChanged=false;
+  $("#editor-panel").close();document.body.classList.remove("dialog-open");renderListings();
+  const listing=[...document.querySelectorAll(".listing")].find(row=>row.dataset.listingKey===previousKey);
+  (listing?.querySelector(".listing-action")||$("#search")).focus({preventScroll:true});
+}
+$("#close-details").addEventListener("click",closeEditor);
+$("#editor-panel").addEventListener("cancel",event=>{event.preventDefault();closeEditor();});
+let backdropPointer=false;
+function outsideEditor(event) {
+  const box=$("#editor-panel").getBoundingClientRect();
+  return event.target===$("#editor-panel")&&(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom);
+}
+$("#editor-panel").addEventListener("pointerdown",event=>{backdropPointer=outsideEditor(event);});
+$("#editor-panel").addEventListener("click",event=>{
+  if(backdropPointer&&outsideEditor(event))closeEditor();
+  backdropPointer=false;
 });
 window.addEventListener("beforeunload",event=>{if(dirty()){event.preventDefault();event.returnValue="";}});
 $("#scan-button").addEventListener("click",async()=>{
@@ -327,6 +370,7 @@ $("#stop-button").addEventListener("click",async()=>{
 $("#rail-orders").addEventListener("click",()=>document.querySelector('[data-view="all"]').click());
 $("#rail-queue").addEventListener("click",()=>document.querySelector('[data-view="queue"]').click());
 $("#rail-settings").addEventListener("click",()=>$("#settings-button").click());
+$("#close-details").prepend(icon("close"));
 $("#original-link").append(icon("arrow"));
 $(".search").prepend(icon("search"));
 refresh();

@@ -69,9 +69,9 @@
         <p id="shown-count" class="list-caption">Загрузка…</p>
         <div id="listings" aria-busy="true"><div class="empty">Загружаем сохранённые заказы…</div></div>
       </section>
-      <aside id="editor-panel" class="editor-panel" aria-label="Заказ и отклик" hidden>
+      <dialog id="editor-panel" class="editor-panel" aria-labelledby="details-title">
+        <div class="editor-top"><span id="details-source"></span><button id="close-details" type="button" class="quiet">Закрыть</button></div>
         <div class="editor-scroll">
-        <div class="editor-top"><span id="details-source"></span><button id="close-details" type="button" class="quiet">К списку</button></div>
         <h2 id="details-title" tabindex="-1"></h2>
         <div id="details-metrics" class="details-metrics"></div>
         <a id="original-link" target="_blank" rel="noopener noreferrer">Открыть на площадке</a>
@@ -100,7 +100,7 @@
           </div>
           <p id="delivery-note" class="delivery-note"></p>
         </div>
-      </aside>
+      </dialog>
     </div>
     </div>
   </main>
