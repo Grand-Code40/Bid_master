@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>CAIgraph — заказы</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <nav class="nav-rail" aria-label="Разделы центра">
+    <a href="/" class="brand-symbol" aria-label="CAIgraph">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M23 8H12L6 16l6 8h11M18 11l5 5-5 5M10 16h13" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <button id="rail-orders" class="rail-button active" type="button" title="Заказы" aria-label="Заказы"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 10v10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
+    <button id="rail-queue" class="rail-button" type="button" title="Очередь откликов" aria-label="Очередь откликов"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7-7-2Zm7 2 9-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button id="rail-settings" class="rail-button rail-bottom" type="button" title="Настройки и источники" aria-label="Открыть настройки"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  </nav>
+  <header class="app-header">
+    <a href="/" class="brand" aria-label="CAIgraph — главная">CAIgraph</a>
+    <span class="header-divider" aria-hidden="true"></span><span class="app-name">Командный центр</span>
+    <div class="header-actions">
+      <span id="connection" role="status">Подключаемся…</span>
+      <button id="settings-button" type="button" aria-expanded="false" aria-controls="settings">Настройки и источники</button>
+    </div>
+  </header>
+  <main>
+    <section id="settings" class="settings" aria-label="Настройки и источники" hidden>
+      <div>
+        <h2>Мониторинг FL.ru</h2>
+        <p>Сборщик проверяет объявления, пока работает командный центр.</p>
+        <div class="monitor-controls">
+          <label class="check"><input id="monitor-enabled" type="checkbox" role="switch" aria-label="Автообновление" disabled> Автообновление</label>
+          <label>Интервал <select id="interval" disabled><option value="30">30 минут</option><option value="60">1 час</option></select></label>
+        </div>
+        <p id="monitor-status" role="status">Загрузка настроек…</p>
+        <h3>Облачный dot</h3>
+        <p id="agent-status">Обращений агента ещё не было.</p>
+        <p>Для работы в облаке передайте dot проект и инструкцию CLOUD_HANDOFF.md из репозитория.</p>
+        <button id="stop-button" type="button" class="quiet" disabled>Выключить центр</button>
+      </div>
+      <div>
+        <h2>Источники</h2>
+        <div id="sources"></div>
+        <p class="muted">Доступ к чтению и отправка откликов подключаются отдельно.</p>
+      </div>
+    </section>
+    <div class="page-heading">
+      <div><h1>Заказы <span id="order-total" class="heading-count"></span></h1><p id="updated-at">Загрузка сохранённых объявлений…</p></div>
+      <button id="scan-button" type="button" disabled>Проверить сейчас</button>
+    </div>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <div class="orders-surface">
+    <nav class="tabs" aria-label="Состояние отклика">
+      <button type="button" data-view="all" class="selected" aria-pressed="true">Все заказы</button>
+      <button type="button" data-view="draft" aria-pressed="false">Черновики <span id="draft-count">0</span></button>
+      <button type="button" data-view="queue" aria-pressed="false">Очередь <span id="queue-count">0</span></button>
+      <button type="button" data-view="sent" aria-pressed="false">Отправленные <span id="sent-count">0</span></button>
+    </nav>
+    <div class="filters">
+      <label class="search"><span class="sr-only">Поиск заказов</span><input id="search" type="search" placeholder="Поиск по названию или описанию"></label>
+      <label><span class="sr-only">Источник</span><select id="source-filter"><option value="all">Все источники</option></select></label>
+      <label><span class="sr-only">Тип объявления</span><select id="kind-filter"><option value="order">Заказы</option><option value="vacancy">Вакансии</option><option value="all">Все объявления</option></select></label>
+      <label class="check"><input id="with-budget" type="checkbox"> С бюджетом</label>
+    </div>
+    <div class="workspace" id="workspace">
+      <section class="feed" aria-label="Список заказов">
+        <p id="shown-count" class="list-caption">Загрузка…</p>
+        <div id="listings" aria-busy="true"><div class="empty">Загружаем сохранённые заказы…</div></div>
+      </section>
+      <aside id="editor-panel" class="editor-panel" aria-label="Заказ и отклик" hidden>
+        <div class="editor-scroll">
+        <div class="editor-top"><span id="details-source"></span><button id="close-details" type="button" class="quiet">К списку</button></div>
+        <h2 id="details-title" tabindex="-1"></h2>
+        <div id="details-metrics" class="details-metrics"></div>
+        <a id="original-link" target="_blank" rel="noopener noreferrer">Открыть на площадке</a>
+        <details class="description" open>
+          <summary id="description-kind">Описание заказа</summary>
+          <p id="details-description"></p>
+          <p id="details-date" class="muted"></p>
+        </details>
+        <div id="reply-area">
+          <div class="reply-heading"><label for="reply-text">Текст отклика</label><span id="review-state"></span></div>
+          <p id="reply-help" class="muted">Проверьте текст, цену и срок перед одобрением.</p>
+          <textarea id="reply-text" rows="8" maxlength="8000" spellcheck="true" disabled></textarea>
+          <div class="editor-meta"><span id="save-state" role="status"></span><span id="char-count">0 / 8000</span></div>
+          <div id="review-message" class="review-message" role="status" hidden></div>
+
+        </div>
+        <p id="reply-unavailable" class="muted" hidden>Отклики доступны для открытых заказов.</p>
+        </div>
+        <div class="editor-footer">
+          <div class="reply-actions">
+            <button id="save-reply" type="button" disabled>Сохранить</button>
+            <button id="approve-reply" type="button" class="primary" disabled>Одобрить текст</button>
+            <button id="queue-reply" type="button" class="primary" hidden>Откликнуться</button>
+            <button id="cancel-reply" type="button" hidden>Снять с отправки</button>
+            <button id="reload-reply" type="button" hidden>Загрузить сохранённый текст</button>
+          </div>
+          <p id="delivery-note" class="delivery-note"></p>
+        </div>
+      </aside>
+    </div>
+    </div>
+  </main>
+</body>
+</html>

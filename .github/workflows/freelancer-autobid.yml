@@ -1,0 +1,74 @@
+name: Freelancer AutoBid
+
+on:
+  schedule:
+    - cron: "0 6,15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freelancer-autobid
+  cancel-in-progress: false
+
+jobs:
+  autobid:
+    if: github.event_name == 'workflow_dispatch' || vars.AUTOBID_SCHEDULE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.AUTOBID_DATABASE_URL }}
+      FREELANCER_ACCOUNTS_JSON: ${{ secrets.FREELANCER_ACCOUNTS_JSON }}
+      FREELANCER_ACCOUNT_01_TOKEN: ${{ secrets.FREELANCER_ACCOUNT_01_TOKEN }}
+      FREELANCER_ACCOUNT_02_TOKEN: ${{ secrets.FREELANCER_ACCOUNT_02_TOKEN }}
+      FREELANCER_ACCOUNT_03_TOKEN: ${{ secrets.FREELANCER_ACCOUNT_03_TOKEN }}
+      FREELANCER_ACCOUNT_04_TOKEN: ${{ secrets.FREELANCER_ACCOUNT_04_TOKEN }}
+      FREELANCER_ACCOUNT_05_TOKEN: ${{ secrets.FREELANCER_ACCOUNT_05_TOKEN }}
+      LLM_BASE_URL: ${{ vars.LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ vars.LLM_MODEL }}
+      LLM_REQUIRED: ${{ vars.LLM_REQUIRED || 'false' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      AUTOBID_ENABLED: ${{ vars.AUTOBID_ENABLED || 'false' }}
+      DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+      EMERGENCY_STOP: ${{ vars.EMERGENCY_STOP || 'false' }}
+      AUTO_BID_SCORE: ${{ vars.AUTO_BID_SCORE || '88' }}
+      REVIEW_SCORE: ${{ vars.REVIEW_SCORE || '75' }}
+      MIN_ACCEPTABLE_BID: ${{ vars.MIN_ACCEPTABLE_BID || '25' }}
+      MAX_AUTO_BID: ${{ vars.MAX_AUTO_BID || '500' }}
+      MAX_DELIVERY_DAYS: ${{ vars.MAX_DELIVERY_DAYS || '7' }}
+      PRICING_RULES_JSON: ${{ vars.PRICING_RULES_JSON }}
+      MAX_BIDS_PER_RUN: ${{ vars.MAX_BIDS_PER_RUN || '1' }}
+      MAX_BIDS_PER_DAY: ${{ vars.MAX_BIDS_PER_DAY || '2' }}
+      MAX_BIDS_PER_MONTH: ${{ vars.MAX_BIDS_PER_MONTH || '20' }}
+      MAX_BIDS_PER_ACCOUNT_PER_DAY: ${{ vars.MAX_BIDS_PER_ACCOUNT_PER_DAY || '1' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install AutoBid
+        run: python -m pip install --disable-pip-version-check -e ".[test]"
+
+      - name: Run targeted AutoBid tests
+        run: python -m pytest tests/autobid -q
+
+      - name: Run finite AutoBid job
+        run: python -m autobid.cli run
+
+      - name: Upload non-sensitive reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: freelancer-autobid-report-${{ github.run_id }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,24 @@
+{
+  "accounts": [
+    {
+      "account_id": 12345678,
+      "username": "cad_profile_01",
+      "token_env": "FREELANCER_ACCOUNT_01_TOKEN",
+      "enabled": true,
+      "profile_tags": ["dxf", "laser", "cad"],
+      "bids_remaining": null,
+      "rating": null
+    },
+    {
+      "account_id": 23456789,
+      "username": "cad_profile_02",
+      "token_env": "FREELANCER_ACCOUNT_02_TOKEN",
+      "enabled": true,
+      "profile_tags": ["svg", "cnc", "vectorization"],
+      "bids_remaining": null,
+      "rating": null
+    }
+  ],
+  "note": "Set FREELANCER_ACCOUNTS_JSON to the JSON array under accounts. Keep OAuth tokens only in the referenced environment variables."
+}
+

@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+.env
+reports/
+.superpowers/
+*.db
+*.sqlite3
+
+# Private runtime and agent handoff files
+.env.*
+!.env.example
+profiles/
+browsers/
+command-center/
+!autobid/command_center/
+*.sqlite3-*
+*.db-*

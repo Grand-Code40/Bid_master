@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drawing-ai-freelancer-autobid"
+version = "0.1.0"
+description = "Safe, finite-run Freelancer AutoBid subsystem for Drawing_AI_Core"
+requires-python = ">=3.11"
+dependencies = [
+  "freelancersdk==0.1.20",
+  "psycopg[binary]>=3.2,<4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+discovery = ["beautifulsoup4>=4.14.3,<5"]
+browser = ["beautifulsoup4>=4.14.3,<5", "playwright>=1.55,<2"]
+
+[project.scripts]
+freelancer-autobid = "autobid.cli:main"
+cad-discovery = "autobid.discovery.cli:main"
+caigraph-agent = "autobid.command_center.agent:main"
+caigraph-center = "autobid.command_center.__main__:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --import-mode=importlib"
+
+
+
+[tool.setuptools.package-data]
+"autobid.command_center" = ["static/*.html", "static/*.css", "static/*.js"]
