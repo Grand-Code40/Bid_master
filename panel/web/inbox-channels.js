@@ -16,7 +16,10 @@
     box.append(node('p','Режим: ручное получение. Последняя попытка: '+stamp(c.last_attempt)+'. Полный обход заданного фильтра: '+stamp(c.last_success)+'.'));
     if(c.error_code)box.append(node('p',errors[c.error_code]??'Не удалось проверить канал'));
     if(c.retry_after_seconds!=null)box.append(node('p','Повторная проверка разрешена не раньше чем через '+c.retry_after_seconds+' с после указанной попытки.'));
-    box.append(node('p',(c.has_more?'Есть ещё страницы; нажмите получение повторно. ':'')+'Сохранено за проверку: '+(c.imported??0)+'. Пропущено безопасностью или форматом: '+(c.skipped??0)+'. Охват: только ограниченные email-уведомления, не все чаты площадок.'));
+    box.append(node('p',(c.has_more?'Есть ещё страницы; нажмите получение повторно. ':'')+'Сохранено за проверку: '+(c.imported??0)+'. Пропущено (безопасность, формат или конфликт): '+(c.skipped??0)+'. Охват: только ограниченные email-уведомления, не все чаты площадок.'));
+    const skipLabels={mail_conflict:'Конфликт с сохранённым отрывком',mail_auth_content:'Письмо авторизации',mail_secret_content:'Распознаны учётные сведения',mail_unsafe_link:'Небезопасная ссылка',malformed_mime:'Неподдержанный формат',no_plain_text:'Нет доступного простого текста',invalid_mail:'Неподдержанная запись'};
+    const omissions=Object.entries(c.skip_reasons??{}).filter(([,count])=>Number.isSafeInteger(count)&&count>0).map(([reason,count])=>(skipLabels[reason]??'Неподдержанная запись')+': '+count);
+    if(omissions.length)box.append(node('p','Причины пропуска: '+omissions.join('; ')));
     const age=Date.now()-Date.parse(c.last_success);box.append(node('p',Number.isFinite(age)&&age>=0?'С завершения полного обхода: '+Math.floor(age/60000)+' мин.':'Свежесть полного обхода пока неизвестна.'));
    }
    return box;

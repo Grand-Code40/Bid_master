@@ -142,3 +142,18 @@ test('concurrent identical operations both replay the one committed result',asyn
   assert.equal((await read('owner','fl','42')).data.revision,2);
  }finally{db.close();}
 });
+
+
+test('concurrent operation ID reuse across different orders mutates only the hash-matched winner',async()=>{
+ const {db,store}=await setup();try{
+  await store.prepare('owner','fl','42',now,'p42');
+  await db.prepare('INSERT INTO listings VALUES (?,?,?,?,?,?,?,1)').bind('owner','fl','43',JSON.stringify({...item,external_id:'43',canonical_url:'https://www.fl.ru/projects/43/test.html'}),'{}',now,now).run();await store.prepare('owner','fl','43',now,'p43');
+  const read=store.get.bind(store);let reads=0,release;const gate=new Promise(r=>release=r);
+  store.get=async(...args)=>{const row=await read(...args);if(++reads<=2){if(reads===2)release();await gate;}return row;};
+  const command={action:'approve',revision:1,operation_id:'shared-operation'};
+  const results=await Promise.allSettled([store.act('owner','fl','42',command,ctx),store.act('owner','fl','43',command,ctx)]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);assert.equal(results.find(x=>x.status==='rejected').reason.message,'operation_conflict');
+  assert.equal([(await read('owner','fl','42')).data,(await read('owner','fl','43')).data].filter(x=>x.state==='approved').length,1);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM review_events WHERE operation_id=?').bind('shared-operation').first()).n,1);
+ }finally{db.close();}
+});

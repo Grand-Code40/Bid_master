@@ -11,7 +11,7 @@ Node 24.17.0; Windows. Все базы синтетические SQLite :memory
 запрещена offline-guard. Никаких клиентских данных, рабочих D1/сессий или live отправок.
 
 - Полученный baseline: build PASS, 206/206 на schema.sql и 206/206 на generated migrations.
-- Текущее дерево: build PASS, **255/255** на schema.sql и **255/255** на generated migrations.
+- Текущее дерево: build PASS, **260/260** на schema.sql и **260/260** на generated migrations.
 - `drizzle-kit generate`: No schema changes, nothing to migrate.
 - Старая Python-версия: 132/132 до начала работы; Python product-код этой веткой не менялся.
 
@@ -46,6 +46,15 @@ USE_GENERATED_MIGRATIONS=1 node --import ./scripts/offline-guard.mjs --test
 - Upgrade заполненной v23 сохраняет старые таблицы/строки/guards/history/viewed/session
   bytes; новые таблицы пусты. schema.sql и generated migration согласны по колонкам
   и уникальным ограничениям.
+
+## Независимое ревью
+
+Проверены code/consent/owner/migration границы. Три Important замечания подтверждены
+RED-регрессиями и исправлены одним проходом: операция не может мутировать другой
+отклик под занятым operation ID; явный refresh/завершённый импорт возобновляет обход
+старых входящих; конфликт полного Gmail письма с сохранённым отрывком отмечается
+как пропуск и не блокирует следующие письма. Старые строки и provenance не меняются.
+После исправлений: 260/260 на каждой схеме. Live границы reviewer отдельно не подтверждал.
 
 ## Что эти проверки НЕ подтверждают
 

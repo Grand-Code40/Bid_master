@@ -21,3 +21,11 @@ test('only explicit click syncs a configured Gmail channel; failures retain inde
  assert.equal(x.$('inbox-sync-gmail').disabled,false);const work=x.$('inbox-sync-gmail').onclick();assert.equal(x.pending[1].url,'/api/inbox/sync');assert.equal(JSON.parse(x.pending[1].options.body).channel,'gmail');assert.equal(x.$('inbox-sync-gmail').disabled,true);
  x.pending[1].resolve({ok:false,status:503,json:async()=>({error:'storage_unavailable'})});await work;assert.match(x.$('inbox-sync-status').textContent,/Не удалось/);assert.equal(x.$('inbox-channels').children.length,3);
 });
+
+
+test('legacy mail conflicts are visible as omissions rather than a false complete import',async()=>{
+ const x=setup();reply(x.pending[0],{channels:[channel('not_checked')]});await flush();
+ const work=x.$('inbox-sync-gmail').onclick();reply(x.pending[1],{...channel('ready'),imported:1,skipped:1,skip_reasons:{mail_conflict:1}});await work;
+ const text=[];function walk(n){if(n.textContent)text.push(n.textContent);for(const child of n.children??[])walk(child);}walk(x.$('inbox-channels'));
+ assert.ok(text.some(t=>/сохранённым.*отрывком|Конфликт.*сохранён/i.test(t)));assert.match(x.$('inbox-sync-status').textContent,/не подтверждает полноту/);
+});

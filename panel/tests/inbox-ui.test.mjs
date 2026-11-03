@@ -85,3 +85,13 @@ test('unified inbox keeps separate platform accounts and labels notification pro
  assert.ok(texts.some(t=>t.includes('Сообщение площадки')));assert.ok(texts.some(t=>t.includes('Gmail API')));assert.ok(texts.some(t=>t.includes('не полная переписка')));assert.ok(texts.some(t=>t.includes('2 с')));
  const mark=x.$('inbox-linked').children[0].children.find(n=>n.tagName==='button').onclick();assert.equal(x.pending[1].url,'/api/inbox/message-viewed');assert.equal(JSON.parse(x.pending[1].options.body).message_key,platform.message_key);x.pending[1].resolve({ok:true});await mark;
 });
+
+
+for(const finished of [false,true])test('explicit refresh restarts historical traversal after '+(finished?'exhausted':'partial')+' pagination',async()=>{
+ const x=setup(),mail=n=>({...malicious,message_id:n.toString(16),subject:'message '+n}),batch=(start,count)=>Array.from({length:count},(_,i)=>mail(start-i));
+ reply(x.pending[0],batch(200,100),'cursor-101');await flush();x.$('inbox-more').onclick();reply(x.pending[1],batch(100,100),finished?null:'cursor-51');await flush();
+ const card=x.$('inbox-unlinked').children[0],details=card.children.find(n=>n.tagName==='details');details.open=true;
+ x.$('inbox-refresh').onclick();reply(x.pending[2],batch(200,100),'cursor-101');await flush();assert.equal(x.$('inbox-more').hidden,false);
+ x.$('inbox-more').onclick();assert.match(x.pending[3].url,/cursor-101/);const older={...mail(999),received_at:'2026-10-31T00:00:00.000Z'};reply(x.pending[3],[older,...batch(100,99)],null);await flush();
+ assert.equal(x.$('inbox-count').textContent,'201');assert.equal(details.open,true);assert.equal(x.$('inbox-unlinked').children.includes(card),true);
+});

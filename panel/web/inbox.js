@@ -2,7 +2,7 @@
 (()=>{
  'use strict';
  const $=id=>document.getElementById(id),messages=new Map(),viewed=new Set(),cards=new Map(),pendingViewed=new Set();
- let loading=false,nextCursor=null,loadedOlder=false,paginationRestarted=false;
+ let loading=false,nextCursor=null,loadedOlder=false,paginationRestarted=false,restartPending=false;
  const key=m=>m.message_key||JSON.stringify(['mail',m.mailbox,m.message_id]);
  function node(tag,text){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n;}
  function syncViewed(m,button){const seen=Boolean(m.panel_viewed_at)||viewed.has(key(m));button.disabled=seen||pendingViewed.has(key(m));button.textContent=seen?'Просмотрено в панели':'Отметить просмотренным в панели';}
@@ -35,30 +35,30 @@
   $('inbox-more').hidden=!nextCursor;$('inbox-more').disabled=loading;
   if(!all.length)$('inbox-status').textContent='Сохранённых входящих пока нет. Это не означает, что новых писем или сообщений на площадках нет.';
  }
- async function load(older=false){
-  if(loading||older&&!nextCursor)return;loading=true;$('inbox-more').disabled=true;
+ async function load(older=false,restart=false){
+  if(loading){if(restart)restartPending=true;return;}if(older&&!nextCursor)return;loading=true;$('inbox-more').disabled=true;
   try{
    const url='/api/inbox/unified'+(older?'?'+new URLSearchParams({cursor:nextCursor}):'');
    const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error();const payload=await r.json();
    const hasNew=payload.messages.some(m=>!messages.has(key(m))),hadMessages=messages.size>0;
    for(const m of payload.messages){const previous=messages.get(key(m));messages.set(key(m),{...m,panel_viewed_at:m.panel_viewed_at||previous?.panel_viewed_at||null});}
    if(older){loadedOlder=true;nextCursor=payload.next_cursor;}
-   else if(!loadedOlder||hasNew){
+   else if(restart||!loadedOlder||hasNew){
     // The head may have advanced by more than one page. Never keep a cursor
     // below an unseen gap: restart traversal at the new first-page boundary.
-    if(hasNew&&hadMessages&&payload.next_cursor)paginationRestarted=true;
+    if((restart||hasNew)&&hadMessages&&payload.next_cursor)paginationRestarted=true;
     loadedOlder=false;nextCursor=payload.next_cursor;
    }
    if(!nextCursor)paginationRestarted=false;
-   $('inbox-status').textContent=paginationRestarted?'Появились новые уведомления. Загрузка более ранних начата от новой границы: нажимайте «Загрузить более ранние», чтобы не пропустить промежуток. Уже открытые письма сохранены.':'Показаны сохранённые уведомления и наблюдённые сообщения площадок. Полнота переписки не подтверждена. Сортировка по времени события: после импорта старые сообщения могут быть ниже, загрузите более ранние.';render();
+   $('inbox-status').textContent=paginationRestarted?'Загрузка более ранних начата от текущей границы, чтобы проверить новые и старые записи. Нажимайте «Загрузить более ранние». Уже открытые письма сохранены.':'Показаны сохранённые уведомления и наблюдённые сообщения площадок. Полнота переписки не подтверждена. Сортировка по времени события: после импорта старые сообщения могут быть ниже, загрузите более ранние.';render();
   }catch{$('inbox-status').textContent='Не удалось обновить входящие. Ранее загруженные уведомления оставлены на экране.';}
-  finally{loading=false;$('inbox-more').disabled=false;}
+  finally{loading=false;$('inbox-more').disabled=false;if(restartPending){restartPending=false;load(false,true);}}
  }
  const panel=$('inbox-panel'),openButton=$('inbox-open');
  panel.ontoggle=()=>openButton.setAttribute('aria-expanded',String(panel.open));
- openButton.onclick=()=>{panel.open=true;openButton.setAttribute('aria-expanded','true');panel.scrollIntoView({block:'start'});panel.focus({preventScroll:true});load();};
- document.addEventListener('bid-inbox-changed',()=>load());
+ openButton.onclick=()=>{panel.open=true;openButton.setAttribute('aria-expanded','true');panel.scrollIntoView({block:'start'});panel.focus({preventScroll:true});load(false,true);};
+ document.addEventListener('bid-inbox-changed',()=>load(false,true));
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)load();});
- $('inbox-refresh').onclick=()=>load();$('inbox-more').onclick=()=>load(true);
+ $('inbox-refresh').onclick=()=>load(false,true);$('inbox-more').onclick=()=>load(true);
  load();setInterval(()=>{if(!document.hidden)load();},15000);
 })();

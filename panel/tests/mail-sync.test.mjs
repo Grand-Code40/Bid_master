@@ -1,3 +1,4 @@
+import {recordMail} from '../src/inbox.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './d1-fixture.mjs';
@@ -152,5 +153,18 @@ test('last_success tracks completed scan and historical new mail has no latency 
  const current='2026-11-03T12:01:00.000Z';const page=await mod.syncMail(db,'owner',env,current,{fetch:server({pages:[{messages:[{id:'aaa'},{id:'aab'}],nextPageToken:'remaining'}],messages:{aaa:message('aaa'),aab:recent}}).fetch});assert.equal(page.last_success,now);assert.equal(page.status,'partial');
  const saved=(await listUnifiedInbox(db,'owner')).messages;assert.equal(saved.find(x=>x.message_id==='aaa').receipt_to_storage_ms,null);assert.equal(saved.find(x=>x.message_id==='aab').receipt_to_storage_ms,30000);
  const complete=await mod.syncMail(db,'owner',env,'2026-11-03T12:02:00.000Z',{fetch:server({pages:[{}]}).fetch});assert.equal(complete.last_success,'2026-11-03T12:02:00.000Z');
+ }finally{db.close();}
+});
+
+
+test('legacy excerpt conflict is visible omitted data without blocking later Gmail messages or changing original bytes',async()=>{
+ const db=await setup();try{
+  await recordMail(db,'owner',{mailbox:env.GMAIL_MAILBOX,message_id:'abc',thread_id:'def',received_at:'2026-11-03T11:59:00.000Z',observed_at:now,sender:'Client <client@example.test>',subject:'Project reply',plain_text:'A relevant excerpt previously observed by the agent',reference:null},now);
+  await db.prepare('UPDATE mail_notifications SET panel_viewed_at=? WHERE owner_id=?').bind(now,'owner').run();const original=await db.prepare('SELECT * FROM mail_notifications WHERE owner_id=? AND message_id=?').bind('owner','abc').first();
+  const provider=server({pages:[{messages:[{id:'abc'},{id:'abd'}]}]});const result=await mod.syncMail(db,'owner',env,now,{fetch:provider.fetch});
+  assert.equal(result.status,'ready');assert.equal(result.imported,1);assert.equal(result.skipped,1);assert.equal(result.skip_reasons.mail_conflict,1);
+  assert.ok(provider.calls.some(c=>new URL(c.url).pathname.endsWith('/messages/abd')));
+  assert.deepEqual(await db.prepare('SELECT * FROM mail_notifications WHERE owner_id=? AND message_id=?').bind('owner','abc').first(),original);
+  const messages=(await listUnifiedInbox(db,'owner')).messages;assert.equal(messages.length,2);assert.equal(messages.find(m=>m.message_id==='abc').provenance,'caller_observed');assert.equal(messages.find(m=>m.message_id==='abd').provenance,'provider_verified');
  }finally{db.close();}
 });
