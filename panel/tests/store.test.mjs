@@ -67,16 +67,39 @@ test('store refuses legacy queue claims and atomically persists explicit owner c
  assert.equal((await store.active('owner')).length,1);
  }finally{db.close();}
 });
-test('cancel racing owner confirmation wins or invalidates it, never leaves stale consent usable',async()=>{
+test('confirmation committed before cancellation read permits both and erases consent',async()=>{
  const {db,store}=await setup();try{
- const row=await store.prepare('owner','fl','42',now,'p');await action(store,'approve',1,'a');await action(store,'queue',1,'q');
- const results=await Promise.allSettled([action(store,'cancel',1,'cancel'),action(store,'confirm_delivery',1,'confirm',{details:deliveryDetails(row)})]);
- assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
- if((await store.get('owner','fl','42')).data.state!=='draft')await action(store,'cancel',1,'cancel2');
- const end=(await store.get('owner','fl','42')).data;assert.equal(end.state,'draft');assert.equal(end.delivery_confirmation,undefined);
- await assert.rejects(()=>action(store,'claim',undefined,'c',{},senderCtx(row)),/review_locked/);
+  const row=await store.prepare('owner','fl','42',now,'p');await action(store,'approve',1,'a');await action(store,'queue',1,'q');
+  const read=store.get.bind(store);let release,entered;const gate=new Promise(r=>release=r),waiting=new Promise(r=>entered=r);let held=false;
+  store.get=async(...args)=>{if(!held){held=true;entered();await gate;}return read(...args);};
+  const cancellation=action(store,'cancel',1,'cancel');await waiting;
+  await action(store,'confirm_delivery',1,'confirm',{details:deliveryDetails(row)});release();
+  assert.equal((await cancellation).state,'draft');
+  const end=(await read('owner','fl','42')).data;assert.equal(end.revision,2);assert.equal(end.delivery_confirmation,undefined);
+  await assert.rejects(()=>action(store,'claim',undefined,'c',{},senderCtx(row)),/review_locked/);
  }finally{db.close();}
 });
+
+for(const winner of ['cancel','confirm_delivery','claim'])test('shared snapshot cancellation versus '+winner+' keeps one CAS winner',async()=>{
+ const {db,store}=await setup();try{
+  const row=await store.prepare('owner','fl','42',now,'p');await action(store,'approve',1,'a');await action(store,'queue',1,'q');
+  if(winner==='claim')await action(store,'confirm_delivery',1,'initial-confirm',{details:deliveryDetails(row)});
+  const read=store.get.bind(store);let reads=0,release;const gate=new Promise(r=>release=r);
+  store.get=async(...args)=>{const result=await read(...args);if(++reads<=2){if(reads===2)release();await gate;}return result;};
+  const other=winner==='cancel'?'confirm_delivery':winner;
+  const batch=db.batch.bind(db),prepare=db.prepare.bind(db),operations=new WeakMap();let unblock;const committed=new Promise(r=>unblock=r),desired=winner==='cancel'?'cancel':'winner';
+  db.prepare=sql=>{const statement=prepare(sql),bind=statement.bind;statement.bind=function(...args){if(sql.startsWith('UPDATE reviews SET data='))operations.set(statement,args[1]);return bind.apply(this,args);};return statement;};
+  db.batch=async stmts=>{const wins=operations.get(stmts[0])===desired;if(!wins)await committed;try{return await batch(stmts);}finally{if(wins)unblock();}};
+  const win=winner==='cancel'?action(store,'cancel',1,'cancel'):action(store,winner,winner==='claim'?undefined:1,'winner',winner==='claim'?{}:{details:deliveryDetails(row)},winner==='claim'?senderCtx(row):ctx);
+  const lose=winner==='cancel'?action(store,other,1,'loser',{details:deliveryDetails(row)}):action(store,'cancel',1,'cancel');
+  const results=await Promise.allSettled([win,lose]);
+  assert.equal(results[0].status,'fulfilled');assert.equal(results[1].status,'rejected');
+  const end=(await read('owner','fl','42')).data;
+  assert.equal(end.state,winner==='cancel'?'draft':winner==='claim'?'sending':'queued');
+  if(winner==='cancel')assert.equal(end.delivery_confirmation,undefined);
+ }finally{db.close();}
+});
+
 test('claim replay recovers same token, result recovery has sender capability and no automatic retry',async()=>{
  const {db,store}=await setup();try{
  const row=await store.prepare('owner','fl','42',now,'p');await action(store,'approve',1,'a');await action(store,'queue',1,'q');await action(store,'confirm_delivery',1,'confirm',{details:deliveryDetails(row)});
@@ -103,5 +126,19 @@ test('existing deployed operation hashes remain compatible after adding delivery
  const oldHash=Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
  await db.prepare('UPDATE review_events SET request_hash=? WHERE operation_id=?').bind(oldHash,'old-save').run();
  assert.deepEqual(await action(store,'save',1,'old-save',{text:'one'}),saved);
+ }finally{db.close();}
+});
+
+
+test('concurrent identical operations both replay the one committed result',async()=>{
+ const {db,store}=await setup();try{
+  await store.prepare('owner','fl','42',now,'prepare');
+  const read=store.get.bind(store);let reads=0,release;const barrier=new Promise(r=>release=r);
+  store.get=async(...args)=>{const row=await read(...args);if(++reads<=2){if(reads===2)release();await barrier;}return row;};
+  const results=await Promise.allSettled([action(store,'save',1,'identical',{text:'one'}),action(store,'save',1,'identical',{text:'one'})]);
+  assert.deepEqual(results.map(x=>x.status),['fulfilled','fulfilled']);
+  assert.deepEqual(results[0].value,results[1].value);
+  assert.equal((await db.prepare('SELECT count(*) AS n FROM review_events WHERE operation_id=?').bind('identical').first()).n,1);
+  assert.equal((await read('owner','fl','42')).data.revision,2);
  }finally{db.close();}
 });
