@@ -1,0 +1,21 @@
+{
+  "status": "No disallowed files or non-fixture private data found in selected source-only package. Not an application security certification.",
+  "method": [
+    "Immutable tracked-file allowlist from base commit, not workspace recursive copy",
+    "Operational documents excluded; hosting project identifier cleared",
+    "Observed order/post identifiers consistently replaced in source and tests",
+    "File types, paths, binary markers, email-like strings, credential signatures and original item identifiers checked",
+    "SQL migrations contain DDL only; package lock downloads refer to npmjs registry",
+    "Manual review of credential hits: all negative-test literals or validation code",
+    "No git history, database files, user mail, live credentials or browser state included"
+  ],
+  "base_commit": "f0bb19a52bc92296ff13c9ab41742aedf617b0e3",
+  "files_before_report_manifest": 64,
+  "violations": [],
+  "limits": [
+    "Not identical to deployment: catalog fixtures, hosting metadata and QA localhost binding sanitized",
+    "One intermittent concurrency-test failure recorded in QA.md",
+    "Live deployment not queried",
+    "No universal secret scanner can guarantee absence; review is limited to this allowlisted source snapshot"
+  ]
+}

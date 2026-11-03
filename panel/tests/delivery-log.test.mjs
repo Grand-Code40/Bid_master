@@ -1,0 +1,72 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture} from './d1-fixture.mjs';
+import {ReviewStore} from '../src/store.mjs';
+import {handleApi} from '../src/api.mjs';
+import {handleMcp} from '../src/mcp.mjs';
+const now='2026-11-03T00:00:00.000Z',origin='https://site.example';
+const identity={source_id:'vmasshtabe',external_id:'synthetic-order'};
+const details={text:'  Actual sent text\n<script>not executable</script>  ',observation:'Observed own response, not a read receipt',observed_at:now,canonical_url:'https://vmasshtabe.ru/task/synthetic-order',delivery_url:'https://vmasshtabe.ru/account/view-task?id=123&response_id=456'};
+const create={...identity,operation_id:'observe',version:0,details};
+async function setup(){const db=fixture(),store=new ReviewStore(db),env={DB:db,OWNER_USER_ID:'owner',WRITER_TOKEN:'x'.repeat(32)};for(const owner of ['owner','other']){const listing={...identity,canonical_url:details.canonical_url,title:'Synthetic only',listing_kind:'order',availability:'open'};await db.prepare('INSERT INTO listings VALUES (?,?,?,?,?,?,?,?)').bind(owner,identity.source_id,identity.external_id,JSON.stringify(listing),'{}',now,now,1).run();await store.prepare(owner,identity.source_id,identity.external_id,now,'prepare');}const request=(path='/api/delivery-log/observe',data=create,headers={})=>new Request(origin+path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','oai-authenticated-user-id':'owner',Origin:origin,...headers},...(data?{body:JSON.stringify(data)}:{})});return {db,store,env,request,send:async(path,data,headers)=>handleApi(request(path,data,headers),env)};}
+async function body(r,status=200){assert.equal(r.status,status,await r.clone().text());return r.json();}
+test('separate observed record retains exact text, corrects with audit, never changes reviews or clears guard',async()=>{
+ const x=await setup();try{const before=await x.db.prepare('SELECT * FROM reviews').all(),events=await x.db.prepare('SELECT * FROM review_events').all();const observed=await body(await x.send());assert.equal(observed.status,'observed');assert.equal(observed.details.text,details.text);assert.equal(observed.auto_send_blocked,true);assert.equal(observed.version,1);assert.deepEqual(await x.db.prepare('SELECT * FROM reviews').all(),before);assert.deepEqual(await x.db.prepare('SELECT * FROM review_events').all(),events);
+ const corrected=await body(await x.send('/api/delivery-log/mark-error',{...identity,operation_id:'correct',version:1,reason:'Associated with wrong order'}));assert.equal(corrected.status,'erroneous');assert.equal(corrected.version,2);assert.equal(corrected.details.text,details.text);assert.equal(corrected.auto_send_blocked,true);
+ const read=await body(await x.send('/api/delivery-log?source_id=vmasshtabe&external_id=synthetic-order',null));assert.equal(read.record.status,'erroneous');assert.equal(read.events.length,2);assert.equal(read.events[0].data.details.text,details.text);assert.equal(read.events[1].data.reason,'Associated with wrong order');
+ assert.deepEqual(await body(await x.send()),observed);assert.equal((await body(await x.send('/api/delivery-log?source_id=vmasshtabe&external_id=synthetic-order',null))).record.version,2);
+ const edited=await x.store.act('owner','vmasshtabe','synthetic-order',{action:'save',revision:1,operation_id:'edit',text:'new draft'},{role:'owner',now});assert.equal(edited.state,'draft');await x.store.act('owner','vmasshtabe','synthetic-order',{action:'approve',revision:2,operation_id:'approve'},{role:'owner',now});await assert.rejects(()=>x.store.act('owner','vmasshtabe','synthetic-order',{action:'queue',revision:2,operation_id:'queue'},{role:'owner',now}),/delivery_guard/);
+ assert.equal((await body(await x.send('/api/delivery-log/observe',{...create,version:2,operation_id:'new-observation',details:{...details,text:'Correct source observed text'}}))).version,3);
+ }finally{x.db.close();}
+});
+test('owner, Origin, strict payload, stale version and changed idempotency fail closed',async()=>{const x=await setup();try{
+ for(const headers of [{Origin:''},{Origin:'null'},{Origin:'https://evil.test'},{'oai-authenticated-user-id':'other'},{'oai-authenticated-user-id':'','X-Bid-Writer-Token':'x'.repeat(32)}])assert.ok([401,403].includes((await x.send(undefined,undefined,headers)).status));
+ for(const data of [{...create,role:'owner'},{...create,version:-1},{...create,version:'0'},{...create,details:{...details,text:''}},{...create,details:{...details,extra:1}},{...create,details:{...details,observed_at:'2026-02-30T00:00:00.000Z'}},{...create,details:{...details,observed_at:'2099-01-01T00:00:00.000Z'}},{...create,details:{...details,canonical_url:'https://vmasshtabe.ru/task/wrong-order'}},{...create,details:{...details,delivery_url:details.delivery_url+'&token=secret'}}])assert.equal((await x.send(undefined,data)).status,400);
+ await body(await x.send());assert.equal((await x.send(undefined,{...create,details:{...details,text:'changed'}})).status,409);assert.equal((await x.send('/api/delivery-log/mark-error',{...identity,version:0,operation_id:'stale',reason:'bad link'})).status,409);assert.equal((await x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id:'blank',reason:' '})).status,400);
+ assert.equal((await x.send('/api/agent/delivery-log/observe',create,{'X-Bid-Writer-Token':'x'.repeat(32)})).status,404);
+ }finally{x.db.close();}});
+test('concurrent observations and corrections have one version winner, same-key retries recover',async()=>{const x=await setup();try{
+ const a=await Promise.all([x.send(),x.send(undefined,{...create,operation_id:'other'})]);assert.equal(a.filter(r=>r.status===200).length,1);assert.equal(a.filter(r=>r.status===409).length,1);
+ const corrections=await Promise.all(['a','b'].map(operation_id=>x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id,reason:operation_id})));assert.equal(corrections.filter(r=>r.status===200).length,1);assert.equal((await x.db.prepare('SELECT * FROM delivery_events').all()).results.length,2);
+ }finally{x.db.close();}});
+test('MCP owner can observe, read and correct without sending; identity and cross-origin rejected',async()=>{const x=await setup();try{const rpc=(name,args,headers={})=>new Request(origin+'/mcp',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':'owner',...headers},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})});for(const headers of [{'oai-authenticated-user-id':'other'},{Origin:'https://evil.test'}])assert.equal((await handleMcp(rpc('bid_observe_delivery',create,headers),x.env)).status,403);
+ for(const [name,args] of [['bid_observe_delivery',create],['bid_mark_delivery_error',{...identity,operation_id:'correct',version:1,reason:'Wrong observation'}],['bid_delivery_log',identity]]){const r=await (await handleMcp(rpc(name,args),x.env)).json();assert.equal(r.result.isError,undefined,JSON.stringify(r));}assert.equal((await x.store.get('owner','vmasshtabe','synthetic-order')).data.state,'draft');
+ }finally{x.db.close();}});
+test('observation committed between queue preflight and CAS prevents queue and audit write',async()=>{const x=await setup();try{
+ await x.store.act('owner','vmasshtabe','synthetic-order',{action:'approve',revision:1,operation_id:'approved'},{role:'owner',now});
+ const batch=x.db.batch.bind(x.db);let injected=false;x.db.batch=async statements=>{if(!injected){injected=true;await body(await x.send());}return batch(statements);};
+ await assert.rejects(()=>x.store.act('owner','vmasshtabe','synthetic-order',{action:'queue',revision:1,operation_id:'queue-race'},{role:'owner',now}),/stale_revision/);
+ assert.equal((await x.store.get('owner','vmasshtabe','synthetic-order')).data.state,'approved');assert.equal((await x.db.prepare("SELECT * FROM review_events WHERE operation_id='queue-race'").all()).results.length,0);
+ }finally{x.db.close();}});
+test('same operation races on distinct records do not mutate the losing record without audit',async()=>{const x=await setup();try{
+ const listing={...identity,external_id:'other-order',canonical_url:'https://vmasshtabe.ru/task/other-order'};await x.db.prepare('INSERT INTO listings VALUES (?,?,?,?,?,?,?,?)').bind('owner','vmasshtabe','other-order',JSON.stringify(listing),'{}',now,now,1).run();
+ const responses=await Promise.all([x.send(),x.send(undefined,{...create,external_id:'other-order',details:{...details,canonical_url:listing.canonical_url}})]);assert.equal(responses.filter(r=>r.status===200).length,1);assert.equal(responses.filter(r=>r.status===409).length,1);assert.equal((await x.db.prepare('SELECT * FROM delivery_records').all()).results.length,1);assert.equal((await x.db.prepare('SELECT * FROM delivery_events').all()).results.length,1);
+ }finally{x.db.close();}});
+test('same operation parallel retries recover exactly one event; other-owner reads stay empty',async()=>{const x=await setup();try{const responses=await Promise.all([x.send(),x.send()]);for(const r of responses)assert.equal(r.status,200);assert.equal((await x.db.prepare('SELECT * FROM delivery_events').all()).results.length,1);const r=await handleApi(x.request('/api/delivery-log?source_id=vmasshtabe&external_id=synthetic-order',null,{'oai-authenticated-user-id':'other'}),{...x.env,OWNER_USER_ID:'other'});assert.deepEqual(await r.json(),{record:null,events:[]});}finally{x.db.close();}});
+test('old terminal records and inbox bytes are preserved when recording/correcting separate accounting',async()=>{const x=await setup();try{
+ const legacy={...(await x.store.get('owner','vmasshtabe','synthetic-order')).data,state:'manual_sent',manual_delivery:{text:'Legacy text',observed_at:now,observation:'Legacy evidence'}};await x.db.prepare('UPDATE reviews SET data=? WHERE owner_id=?').bind(JSON.stringify(legacy),'owner').run();await x.db.prepare('INSERT INTO review_events VALUES (?,?,?,?,?,?,?,?)').bind('owner','legacy','vmasshtabe','synthetic-order','record_manual_delivery',now,JSON.stringify(legacy),'legacy-hash').run();await x.db.prepare('INSERT INTO mail_notifications VALUES (?,?,?,?,?,?,?,?,?,?)').bind('owner','synthetic@example.test','abc',now,now,'{"plain_text":"Original"}',null,null,'unlinked',null).run();
+ const tables=['listings','reviews','review_events','mail_notifications'];const read=()=>Promise.all(tables.map(t=>x.db.prepare('SELECT * FROM '+t).all()));const before=await read();await body(await x.send());await body(await x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id:'error',reason:'Incorrect association'}));assert.deepEqual(await read(),before);
+ }finally{x.db.close();}});
+test('already queued work is skipped after observation even when accounting marked erroneous',async()=>{const x=await setup();try{
+ const queued={...(await x.store.get('owner','vmasshtabe','synthetic-order')).data,state:'queued',approved_revision:1,delivery_confirmation:{version:1}};await x.db.prepare('UPDATE reviews SET data=? WHERE owner_id=?').bind(JSON.stringify(queued),'owner').run();await body(await x.send());await body(await x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id:'error',reason:'Incorrect association'}));assert.equal(await x.store.claimNext('owner',null,'claim',{role:'sender',enabled:true,now}),null);await assert.rejects(()=>x.store.act('owner','vmasshtabe','synthetic-order',{action:'claim',operation_id:'direct-claim'},{role:'sender',enabled:true,now}),/delivery_guard/);
+ }finally{x.db.close();}});
+test('head and full audit are one consistent read snapshot during a concurrent correction',async()=>{const x=await setup();try{
+ await body(await x.send());const prepare=x.db.prepare.bind(x.db);let injected=false;x.db.prepare=sql=>{const statement=prepare(sql);if(sql.startsWith('SELECT')&&sql.includes('FROM delivery_records'))for(const method of ['first','all']){const execute=statement[method].bind(statement);statement[method]=async()=>{const value=await execute();if(!injected){injected=true;await body(await x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id:'between-read',reason:'Concurrent correction'}));}return value;};}return statement;};
+ const log=await body(await x.send('/api/delivery-log?source_id=vmasshtabe&external_id=synthetic-order',null));assert.equal(log.record.version,log.events.at(-1).data.version);assert.equal(log.events.length,log.record.version);
+ }finally{x.db.close();}});
+
+test('v19 legacy manual_sent remains visible and terminal after separate accounting error annotation',async()=>{
+ const x=await setup();try{
+  const legacy={...(await x.store.get('owner','vmasshtabe','synthetic-order')).data,state:'manual_sent',manual_delivery:{version:1,text:'Exact previously recorded response',observation:'Previously observed own response',observed_at:now,recorded_at:now,delivery_url:details.delivery_url}};
+  await x.db.prepare('UPDATE reviews SET data=? WHERE owner_id=?').bind(JSON.stringify(legacy),'owner').run();
+  await x.db.prepare('INSERT INTO review_events VALUES (?,?,?,?,?,?,?,?)').bind('owner','legacy-manual','vmasshtabe','synthetic-order','record_manual_delivery',now,JSON.stringify(legacy),'legacy-hash').run();
+  const before=await x.db.prepare("SELECT * FROM review_events WHERE owner_id='owner'").all();
+  await body(await x.send());await body(await x.send('/api/delivery-log/mark-error',{...identity,version:1,operation_id:'accounting-error',reason:'Incorrect new accounting observation'}));
+  const state=await body(await x.send('/api/state',null));const visible=state.reviews.find(r=>r.source_id==='vmasshtabe'&&r.external_id==='synthetic-order');
+  assert.equal(visible.state,'manual_sent');assert.deepEqual(visible.manual_delivery,legacy.manual_delivery);
+  for(const action of ['save','approve','queue','cancel','confirm_delivery'])await assert.rejects(()=>x.store.act('owner','vmasshtabe','synthetic-order',{action,revision:1,operation_id:'legacy-'+action,text:'Changed',details:{}},{role:'owner',now}),/review_locked/);
+  assert.deepEqual(await x.db.prepare("SELECT * FROM review_events WHERE owner_id='owner'").all(),before);
+  assert.deepEqual((await x.store.get('owner','vmasshtabe','synthetic-order')).data,legacy);
+  const log=await body(await x.send('/api/delivery-log?source_id=vmasshtabe&external_id=synthetic-order',null));assert.equal(log.record.status,'erroneous');assert.equal(log.record.auto_send_blocked,true);assert.equal(log.events.length,2);
+ }finally{x.db.close();}
+});

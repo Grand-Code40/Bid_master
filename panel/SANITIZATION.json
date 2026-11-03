@@ -1,0 +1,26 @@
+{
+  "base_commit": "f0bb19a52bc92296ff13c9ab41742aedf617b0e3",
+  "base_description": "Sites v23, deployment attribution supplied by task owner; live service not queried by this packaging job",
+  "byte_identical_to_deployed": false,
+  "changed_for_redaction": [
+    "drizzle/meta/_journal.json",
+    "scripts/dev-preview.mjs",
+    "src/scans.mjs",
+    "src/sources.mjs",
+    "tests/registry.test.mjs",
+    "tests/scans.test.mjs",
+    "tests/source-catalog.test.mjs",
+    "tests/ui-modal.test.mjs",
+    "tests/vmasshtabe.test.mjs"
+  ],
+  "hosting": "project_id removed; build:sites intentionally fails until explicit configuration",
+  "excluded": [
+    "all operational docs and handoffs",
+    "git history and metadata",
+    "working databases and dumps",
+    "emails, real orders and browser state",
+    "credentials and environment files",
+    "node_modules and generated builds"
+  ],
+  "synthetic_only": "Retained example.test addresses and obvious dummy authentication test strings are negative-test fixtures, not user credentials. Public source/channel registry names remain. Observed item identities replaced with synthetic identifiers; never browse those fixture URLs."
+}

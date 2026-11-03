@@ -1,0 +1,16 @@
+{
+  "name": "bid-master-sites-preparation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:local": "node scripts/build-local.mjs",
+    "build:sites": "node scripts/build-sites.mjs",
+    "db:generate": "drizzle-kit generate",
+    "test": "node scripts/build-local.mjs && node --test",
+    "dev": "node scripts/build-local.mjs && node scripts/dev-preview.mjs"
+  },
+  "devDependencies": {
+    "drizzle-kit": "0.31.10",
+    "drizzle-orm": "0.45.2"
+  }
+}

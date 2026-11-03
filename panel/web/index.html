@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>CAIgraph — заказы</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <nav class="nav-rail" aria-label="Разделы центра">
+    <a href="/" class="brand-symbol" aria-label="CAIgraph">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M23 8H12L6 16l6 8h11M18 11l5 5-5 5M10 16h13" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+    <button id="rail-orders" class="rail-button active" type="button" title="Заказы" aria-label="Заказы"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 4h16v16H4zM4 10h16M10 10v10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg></button>
+    <button id="rail-queue" class="rail-button" type="button" title="Очередь откликов" aria-label="Очередь откликов"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7-7-2Zm7 2 9-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button id="rail-settings" class="rail-button rail-bottom" type="button" title="Настройки и источники" aria-label="Открыть настройки"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+  </nav>
+  <header class="app-header">
+    <a href="/" class="brand" aria-label="CAIgraph — главная">CAIgraph</a>
+    <span class="header-divider" aria-hidden="true"></span><span class="app-name">Командный центр</span>
+    <div class="header-actions">
+      <button id="inbox-open" type="button" aria-expanded="false" aria-controls="inbox-panel">Входящие</button>
+      <span id="connection" role="status">Подключаемся…</span>
+      <button id="settings-button" type="button" aria-expanded="false" aria-controls="settings">Настройки и источники</button>
+    </div>
+  </header>
+  <main>
+    <section id="settings" class="settings" aria-label="Настройки и источники" hidden>
+      <div>
+        <h2>Облачный мониторинг</h2>
+        <p>Карточки добавляет dot через защищённый импорт. Панель хранит их в облаке.</p>
+        <div class="monitor-controls">
+          <label class="check"><input id="monitor-enabled" type="checkbox" role="switch" aria-label="Автообновление" disabled> Автообновление</label>
+          <label>Интервал <select id="interval" disabled><option value="30">30 минут</option><option value="60">1 час</option></select></label>
+        </div>
+        <p id="monitor-status" role="status">Загрузка настроек…</p>
+        <h3>Облачный dot</h3>
+        <p id="agent-status">Обращений агента ещё не было.</p>
+        <p>Фоновое расписание пока не подключено. Эта панель не зависит от включённого ПК.</p>
+        <button id="stop-button" type="button" class="quiet" disabled>Постоянная облачная панель</button>
+      </div>
+      <div>
+        <h2>Источники</h2>
+        <p id="scan-coverage" class="muted" role="status">Загрузка журнала проверок…</p>
+        <div id="sources"></div>
+        <p class="muted">Доступ к чтению и отправка откликов подключаются отдельно.</p>
+      </div>
+    </section>
+    <div class="page-heading">
+      <div><h1>Заказы <span id="order-total" class="heading-count"></span></h1><p id="updated-at">Загрузка сохранённых объявлений…</p></div>
+      <button id="scan-button" type="button" disabled>Обновить карточки</button>
+    </div>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <details id="delivery-panel" class="inbox-panel">
+      <summary>Журнал наблюдённых отправок · исправляемый учёт</summary>
+      <p>Только реально наблюдённые отклики В Масштабе. Этот журнал не отправляет сообщения. Ошибку учёта можно отметить с причиной; эта отметка не отменяет и не подтверждает фактическую отправку. Исходный текст и вся история сохраняются в аудите без возможности удаления. Защита от повторной автоматической отправки сохраняется отдельно, снять её здесь нельзя. Старые записи и черновики не меняются.</p>
+      <label>Заказ <select id="delivery-order"></select></label>
+      <button id="delivery-refresh" type="button">Обновить журнал</button>
+      <p id="delivery-status" role="status">Загрузка…</p>
+      <fieldset><legend>Наблюдение владельца</legend>
+        <label>Точный наблюдённый отправленный текст, не черновик <textarea id="delivery-text" maxlength="8000" rows="6"></textarea></label>
+        <label>Что наблюдали <textarea id="delivery-observation" maxlength="2000"></textarea></label>
+        <label>Время наблюдения UTC <input id="delivery-observed-at" placeholder="2026-11-03T09:00:00.000Z"></label>
+        <label>Ссылка на переписку <input id="delivery-url" type="url" placeholder="https://vmasshtabe.ru/account/view-task?id=123&amp;response_id=456"></label>
+        <button id="delivery-observe" type="button">Записать наблюдение</button>
+      </fieldset>
+      <fieldset><legend>Исправление учёта</legend>
+        <label>Причина ошибки <textarea id="delivery-reason" maxlength="2000"></textarea></label>
+        <button id="delivery-error" type="button">Пометить учётную запись ошибочной</button>
+      </fieldset>
+      <div id="delivery-history"></div>
+    </details>
+    <details id="inbox-panel" class="inbox-panel" tabindex="-1">
+      <summary>Входящие уведомления <span id="inbox-count">0</span></summary>
+      <p>Письма, которые dot прочитал и сохранил с вашего разрешения. Панель не подключается к Gmail напрямую и не отправляет ответы. Обновление панели каждые 15 секунд не означает проверку почты.</p>
+      <p id="inbox-unviewed">Непросмотренные среди загруженных: неизвестно</p>
+      <p>Письма и сообщения внутри площадок могут отличаться: уведомление не гарантирует полноту переписки. Подключение прямого чтения чатов здесь не подтверждено.</p>
+      <details id="inbox-coverage" class="inbox-coverage">
+        <summary>Каналы входящих · настройки проверены <time datetime="2026-11-03">03.11.2026</time></summary>
+        <p>Это снимок настроек на указанную дату, не проверка новых сообщений. Включённая email-опция не подтверждает доставку письма или его появление в этой панели. Прямое чтение переписок площадок не подключено.</p>
+        <dl>
+          <div data-inbox-source="fl"><dt>FL.ru</dt><dd>Email включён. Новые сообщения и комментарии.</dd></div>
+          <div data-inbox-source="freelance"><dt>Freelance.ru</dt><dd>Email включён. Новые сообщения и события.</dd></div>
+          <div data-inbox-source="weblancer"><dt>Weblancer</dt><dd>Общий email включён: по пояснению сайта, через 5 минут, если уведомление не прочитано. Охват личных сообщений не подтверждён.</dd></div>
+          <div data-inbox-source="vmasshtabe"><dt>В Масштабе</dt><dd>Не установлено: отдельная настройка email для сообщений не найдена.</dd></div>
+          <div data-inbox-source="3ddd"><dt>3ddd</dt><dd>Не установлено: отдельная настройка email для личных сообщений не найдена.</dd></div>
+          <div data-inbox-source="enginer"><dt>Enginer</dt><dd>Не установлено: в доступных настройках нет переключателя уведомлений.</dd></div>
+        </dl>
+      </details>
+      <p id="inbox-status" role="status">Загрузка сохранённых уведомлений…</p>
+      <button id="inbox-refresh" type="button">Обновить входящие</button>
+      <h2>Связаны по точному URL заказа</h2><div id="inbox-linked"></div>
+      <h2>Без подтверждённой связи</h2><div id="inbox-unlinked"></div>
+      <button id="inbox-more" type="button" hidden>Загрузить более ранние</button>
+    </details>
+    <div class="orders-surface">
+    <nav class="tabs" aria-label="Состояние отклика">
+      <button type="button" data-view="all" class="selected" aria-pressed="true">Все заказы</button>
+      <button type="button" data-view="draft" aria-pressed="false">Черновики <span id="draft-count">0</span></button>
+      <button type="button" data-view="queue" aria-pressed="false">Очередь <span id="queue-count">0</span></button>
+      <button type="button" data-view="sent" aria-pressed="false">Отправленные <span id="sent-count">0</span></button>
+    </nav>
+    <div class="filters">
+      <label class="search"><span class="sr-only">Поиск заказов</span><input id="search" type="search" placeholder="Поиск по названию или описанию"></label>
+      <label><span class="sr-only">Источник</span><select id="source-filter"><option value="all">Все источники</option></select></label>
+      <label><span class="sr-only">Тип объявления</span><select id="kind-filter"><option value="order">Заказы</option><option value="vacancy">Вакансии</option><option value="all">Все объявления</option></select></label>
+      <label class="check"><input id="with-budget" type="checkbox"> С бюджетом</label>
+    </div>
+    <div class="workspace" id="workspace">
+      <section class="feed" aria-label="Список заказов">
+        <p id="shown-count" class="list-caption">Загрузка…</p>
+        <div id="listings" aria-busy="true"><div class="empty">Загружаем сохранённые заказы…</div></div>
+      </section>
+      <dialog id="editor-panel" class="editor-panel" aria-labelledby="details-title">
+        <div class="editor-top"><span id="details-source"></span><button id="close-details" type="button" class="quiet">Закрыть</button></div>
+        <div class="editor-scroll">
+        <div id="review-message" class="review-message" role="status" hidden></div>
+        <h2 id="details-title" tabindex="-1"></h2>
+        <div id="details-metrics" class="details-metrics"></div>
+        <a id="original-link" target="_blank" rel="noopener noreferrer">Открыть на площадке</a>
+        <details class="description" open>
+          <summary id="description-kind">Описание заказа</summary>
+          <p id="details-description"></p>
+          <p id="details-date" class="muted"></p>
+        </details>
+        <div id="reply-area">
+          <div class="reply-heading"><label for="reply-text">Текст отклика</label><span id="review-state"></span></div>
+          <p id="reply-help" class="muted">Проверьте текст, цену и срок перед одобрением.</p>
+          <textarea id="reply-text" rows="8" maxlength="8000" spellcheck="true" disabled></textarea>
+          <div class="editor-meta"><span id="save-state" role="status"></span><span id="char-count">0 / 8000</span></div>
+
+        </div>
+        <p id="manual-delivery-record" hidden></p>
+        <fieldset id="delivery-confirmation" hidden>
+          <legend>Разрешение на один конкретный отклик</legend>
+          <p class="muted">Отправитель отключён. Эти данные не выполняют вход и не отправляют сообщение. Укажите точные логины или ссылки профилей — не пароли.</p>
+          <label>Ваш аккаунт на площадке <input id="sender-account" maxlength="500" autocomplete="off"></label>
+          <label>Аккаунт заказчика <input id="recipient-account" maxlength="500" autocomplete="off"></label>
+          <label>Цена в отдельном поле формы <input id="delivery-price" type="number" min="0" step="0.01" placeholder="Не требуется"></label>
+          <label>Валюта <input id="delivery-currency" maxlength="3" placeholder="RUB"></label>
+          <label>Срок в отдельном поле формы <input id="delivery-deadline" maxlength="500" placeholder="Не требуется"></label>
+          <label>Расход уже имеющегося отклика <select id="delivery-credit"><option value="0">Бесплатно</option><option value="1">Один имеющийся отклик</option></select></label>
+          <p class="muted">Покупки, подписки и принятие условий сделки этим разрешением не допускаются. Если обязательные поля неизвестны — не подтверждайте.</p>
+          <button id="confirm-delivery" type="button">Разрешить один отклик…</button>
+        </fieldset>
+        <p id="reply-unavailable" class="muted" hidden>Отклики доступны для открытых заказов.</p>
+        </div>
+        <div class="editor-footer">
+          <div class="reply-actions">
+            <button id="copy-open-reply" type="button" class="primary" disabled>Скопировать и открыть заказ</button>
+            <button id="copy-reply" type="button" disabled>Скопировать текст</button>
+            <button id="save-reply" type="button" disabled>Сохранить</button>
+            <button id="approve-reply" type="button" class="primary" disabled>Одобрить текст</button>
+            <button id="queue-reply" type="button" class="primary" hidden>В очередь</button>
+            <button id="cancel-reply" type="button" hidden>Снять с отправки</button>
+            <button id="reload-reply" type="button" hidden>Загрузить сохранённый текст</button>
+          </div>
+          <p class="delivery-note">После открытия заказа вставьте текст и отправьте его самостоятельно. Эта кнопка не отправляет отклик и не меняет его статус.</p>
+          <p id="delivery-note" class="delivery-note"></p>
+        </div>
+      </dialog>
+    </div>
+    </div>
+  </main>
+  <script src="/inbox.js" defer></script>
+  <script src="/delivery.js" defer></script>
+</body>
+</html>
+
