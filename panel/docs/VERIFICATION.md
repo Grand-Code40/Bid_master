@@ -13,6 +13,9 @@ Node 24.17.0; Windows. Все базы синтетические SQLite :memory
 - Полученный baseline: build PASS, 206/206 на schema.sql и 206/206 на generated migrations.
 - Текущее дерево: build PASS, **260/260** на schema.sql и **260/260** на generated migrations.
 - `drizzle-kit generate`: No schema changes, nothing to migrate.
+- Браузерная QA на loopback с синтетической базой: одобрение текста, отключённая
+  отправка и её preflight, очередь с явной пометкой, единый Inbox, статусы каналов
+  и локальная отметка просмотра. Ошибок console не обнаружено; upstream отсутствует.
 - Старая Python-версия: 132/132 до начала работы; Python product-код этой веткой не менялся.
 
 Команды из panel/:
