@@ -48,3 +48,40 @@ CREATE TABLE delivery_events (
  PRIMARY KEY(owner_id,operation_id)
 );
 CREATE UNIQUE INDEX delivery_events_version ON delivery_events(owner_id,source_id,external_id,version);
+
+-- Additive delivery orchestration. Contains no provider credentials.
+CREATE TABLE delivery_preflights (
+ owner_id TEXT NOT NULL, id TEXT NOT NULL, source_id TEXT NOT NULL, external_id TEXT NOT NULL,
+ revision INTEGER NOT NULL, storage_version INTEGER NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)),
+ expires_at TEXT NOT NULL, used_by TEXT, created_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id,id)
+);
+CREATE TABLE delivery_attempts (
+ owner_id TEXT NOT NULL, operation_id TEXT NOT NULL, source_id TEXT NOT NULL, external_id TEXT NOT NULL,
+ revision INTEGER NOT NULL, preflight_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+ data TEXT NOT NULL CHECK(json_valid(data)),
+ PRIMARY KEY(owner_id,operation_id),
+ UNIQUE(owner_id,source_id,external_id,revision), UNIQUE(owner_id,preflight_id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_messages (
+ owner_id TEXT NOT NULL, source_id TEXT NOT NULL, account_id TEXT NOT NULL, message_id TEXT NOT NULL,
+ received_at TEXT NOT NULL, recorded_at TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)),
+ external_id TEXT NOT NULL, panel_viewed_at TEXT,
+ PRIMARY KEY(owner_id,source_id,account_id,message_id)
+);
+CREATE INDEX IF NOT EXISTS platform_messages_recent ON platform_messages(owner_id,received_at,source_id,account_id,message_id);
+CREATE TABLE IF NOT EXISTS inbox_sync_state (
+ owner_id TEXT NOT NULL, channel TEXT NOT NULL, config_fingerprint TEXT NOT NULL, mailbox TEXT NOT NULL,
+ page_cursor TEXT, initial_complete INTEGER NOT NULL DEFAULT 0 CHECK(initial_complete IN (0,1)),
+ lease_id TEXT, lease_until TEXT, status TEXT NOT NULL, last_attempt TEXT, last_success TEXT,
+ error_code TEXT, retry_after_seconds INTEGER CHECK(retry_after_seconds IS NULL OR retry_after_seconds BETWEEN 0 AND 86400), imported INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0,
+ skip_reasons TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(skip_reasons)),
+ PRIMARY KEY(owner_id,channel)
+);
+CREATE TABLE IF NOT EXISTS mail_provider_provenance (
+ owner_id TEXT NOT NULL, mailbox TEXT NOT NULL, message_id TEXT NOT NULL,
+ verified_at TEXT NOT NULL, receipt_to_storage_ms INTEGER,
+ PRIMARY KEY(owner_id,mailbox,message_id),
+ CHECK(receipt_to_storage_ms IS NULL OR receipt_to_storage_ms>=0)
+);

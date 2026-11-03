@@ -13,7 +13,7 @@ function identity(args){
 function timestamp(value,now){if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)||!Number.isFinite(Date.parse(value))||new Date(value).toISOString()!==value||value>now)fail();return value;}
 // Fail closed on authentication-related mail, recognized secrets and opaque links.
 // This is deliberately conservative, not a claim to detect every possible secret.
-function safeMailText(value){
+export function safeMailText(value){
  const normalized=value.normalize('NFKC');
  const urls=normalized.match(/https?:\/\/[^\s<>"']+/giu)??[];
  for(const raw of urls){let url;try{url=new URL(raw);}catch{fail('mail_unsafe_link');}

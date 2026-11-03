@@ -6,7 +6,7 @@
     "build:local": "node scripts/build-local.mjs",
     "build:sites": "node scripts/build-sites.mjs",
     "db:generate": "drizzle-kit generate",
-    "test": "node scripts/build-local.mjs && node --test",
+    "test": "node scripts/build-local.mjs && node --import ./scripts/offline-guard.mjs --test",
     "dev": "node scripts/build-local.mjs && node scripts/dev-preview.mjs"
   },
   "devDependencies": {

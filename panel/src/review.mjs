@@ -65,12 +65,12 @@ export function transition(current, command, ctx) {
   }
   // A text revision, cancellation or proven non-delivery requires new
   // explicit per-delivery consent, not reuse of a previous sending snapshot.
-  if(row.revision!==current.revision) delete row.delivery_confirmation;
+  if(row.revision!==current.revision) { delete row.delivery_confirmation; delete row.delivery_attempt_id; }
   row.updated_at=ctx.now;
   return row;
 }
 export function publicReview(row) {
-  const keys=['source_id','external_id','canonical_url','title','text','revision','state','approved_revision','created_at','updated_at','claimed_at','evidence','delivery_url','delivery_confirmation','manual_delivery'];
+  const keys=['source_id','external_id','canonical_url','title','text','revision','state','approved_revision','created_at','updated_at','claimed_at','evidence','delivery_url','delivery_confirmation','manual_delivery','delivery_attempt_id'];
   return Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]]));
 }
 

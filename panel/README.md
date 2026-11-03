@@ -1,6 +1,14 @@
-# CAIgraph: очищенные исходники Sites v23
+# Bid Master: доработка очищенной производной Sites v23
 
 База: `f0bb19a52bc92296ff13c9ab41742aedf617b0e3`. По контексту передачи это deployed Sites v23. Живой сервис в ходе упаковки не проверялся. Это **очищенная производная копия**, а не побайтовый backup production и не готовый deployment archive.
+
+## Доработка отправки и Inbox
+
+[Конфигурация и применение diff](docs/CONFIGURATION.md), [контракт исполнителя](docs/SENDER_SERVICE.md), [проверки](docs/VERIFICATION.md).
+
+Добавлены однократная owner-driven попытка с точным readback/uncertain, совместимый единый Inbox и ограниченный read-only Gmail клиент. Реальный исполнитель, Gmail OAuth и production развёртывание здесь не подключены. Weblancer на паузе.
+
+`MANIFEST.sha256`, `AUDIT.json`, `SANITIZATION.json` и исходный `QA.md` описывают полученный baseline, не обновлённое дерево. Baseline сохранён отдельным commit; новые изменения проверяются по Git diff и итоговому отчёту.
 
 ## Что передано
 

@@ -73,17 +73,24 @@
       <div id="delivery-history"></div>
     </details>
     <details id="inbox-panel" class="inbox-panel" tabindex="-1">
-      <summary>Входящие уведомления <span id="inbox-count">0</span></summary>
-      <p>Письма, которые dot прочитал и сохранил с вашего разрешения. Панель не подключается к Gmail напрямую и не отправляет ответы. Обновление панели каждые 15 секунд не означает проверку почты.</p>
+      <summary>Входящие · загружено <span id="inbox-count">0</span></summary>
+      <p>Единый список сохранённых email-уведомлений и наблюдённых сообщений площадок. Источник и способ получения указаны у каждой записи. Обновление списка каждые 15 секунд читает только хранилище панели и не запускает проверку Gmail.</p>
       <p id="inbox-unviewed">Непросмотренные среди загруженных: неизвестно</p>
       <p>Письма и сообщения внутри площадок могут отличаться: уведомление не гарантирует полноту переписки. Подключение прямого чтения чатов здесь не подтверждено.</p>
+      <section class="inbox-channel-settings" aria-label="Получение входящих">
+        <h2>Получение входящих</h2>
+        <p>Настроенный Gmail проверяется только по кнопке. Задержка у проверенных писем — время от получения в Gmail до сохранения в панели. Задержка от площадки до email и полнота чатов неизвестны.</p>
+        <div id="inbox-channels"></div>
+        <button id="inbox-sync-gmail" type="button" disabled>Получить письма Gmail</button>
+        <p id="inbox-sync-status" role="status"></p>
+      </section>
       <details id="inbox-coverage" class="inbox-coverage">
-        <summary>Каналы входящих · настройки проверены <time datetime="2026-11-03">03.11.2026</time></summary>
+        <summary>Исторический снимок настроек · проверены <time datetime="2026-11-03">03.11.2026</time></summary>
         <p>Это снимок настроек на указанную дату, не проверка новых сообщений. Включённая email-опция не подтверждает доставку письма или его появление в этой панели. Прямое чтение переписок площадок не подключено.</p>
         <dl>
           <div data-inbox-source="fl"><dt>FL.ru</dt><dd>Email включён. Новые сообщения и комментарии.</dd></div>
           <div data-inbox-source="freelance"><dt>Freelance.ru</dt><dd>Email включён. Новые сообщения и события.</dd></div>
-          <div data-inbox-source="weblancer"><dt>Weblancer</dt><dd>Общий email включён: по пояснению сайта, через 5 минут, если уведомление не прочитано. Охват личных сообщений не подтверждён.</dd></div>
+          <div data-inbox-source="weblancer"><dt>Weblancer</dt><dd>На паузе, получение отключено. Исторически общий email включён: по пояснению сайта, через 5 минут, если уведомление не прочитано. Охват личных сообщений не подтверждён.</dd></div>
           <div data-inbox-source="vmasshtabe"><dt>В Масштабе</dt><dd>Не установлено: отдельная настройка email для сообщений не найдена.</dd></div>
           <div data-inbox-source="3ddd"><dt>3ddd</dt><dd>Не установлено: отдельная настройка email для личных сообщений не найдена.</dd></div>
           <div data-inbox-source="enginer"><dt>Enginer</dt><dd>Не установлено: в доступных настройках нет переключателя уведомлений.</dd></div>
@@ -135,7 +142,7 @@
         <p id="manual-delivery-record" hidden></p>
         <fieldset id="delivery-confirmation" hidden>
           <legend>Разрешение на один конкретный отклик</legend>
-          <p class="muted">Отправитель отключён. Эти данные не выполняют вход и не отправляют сообщение. Укажите точные логины или ссылки профилей — не пароли.</p>
+          <p class="muted">Сохранение этих данных не выполняет вход и не отправляет сообщение. Укажите точные логины или ссылки профилей — не пароли. Доступность исполнителя показана ниже.</p>
           <label>Ваш аккаунт на площадке <input id="sender-account" maxlength="500" autocomplete="off"></label>
           <label>Аккаунт заказчика <input id="recipient-account" maxlength="500" autocomplete="off"></label>
           <label>Цена в отдельном поле формы <input id="delivery-price" type="number" min="0" step="0.01" placeholder="Не требуется"></label>
@@ -143,7 +150,10 @@
           <label>Срок в отдельном поле формы <input id="delivery-deadline" maxlength="500" placeholder="Не требуется"></label>
           <label>Расход уже имеющегося отклика <select id="delivery-credit"><option value="0">Бесплатно</option><option value="1">Один имеющийся отклик</option></select></label>
           <p class="muted">Покупки, подписки и принятие условий сделки этим разрешением не допускаются. Если обязательные поля неизвестны — не подтверждайте.</p>
-          <button id="confirm-delivery" type="button">Разрешить один отклик…</button>
+          <button id="confirm-delivery" type="button">Подтвердить условия отклика…</button>
+          <button id="preflight-delivery" type="button" disabled>Проверить возможность отправки</button>
+          <pre id="preflight-details" class="mail-plain-text" hidden></pre>
+          <button id="send-delivery" type="button" class="primary" hidden disabled>Отправить один раз…</button>
         </fieldset>
         <p id="reply-unavailable" class="muted" hidden>Отклики доступны для открытых заказов.</p>
         </div>
@@ -153,11 +163,12 @@
             <button id="copy-reply" type="button" disabled>Скопировать текст</button>
             <button id="save-reply" type="button" disabled>Сохранить</button>
             <button id="approve-reply" type="button" class="primary" disabled>Одобрить текст</button>
-            <button id="queue-reply" type="button" class="primary" hidden>В очередь</button>
+            <button id="queue-reply" type="button" class="primary" hidden>В очередь (не отправляет)</button>
             <button id="cancel-reply" type="button" hidden>Снять с отправки</button>
             <button id="reload-reply" type="button" hidden>Загрузить сохранённый текст</button>
           </div>
           <p class="delivery-note">После открытия заказа вставьте текст и отправьте его самостоятельно. Эта кнопка не отправляет отклик и не меняет его статус.</p>
+          <button id="recover-delivery" type="button" hidden>Проверить результат без повторной отправки</button>
           <p id="delivery-note" class="delivery-note"></p>
         </div>
       </dialog>
@@ -165,7 +176,7 @@
     </div>
   </main>
   <script src="/inbox.js" defer></script>
+  <script src="/inbox-channels.js" defer></script>
   <script src="/delivery.js" defer></script>
 </body>
 </html>
-

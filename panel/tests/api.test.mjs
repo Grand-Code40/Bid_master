@@ -65,7 +65,7 @@ test('delivery confirmation is separate owner-only exact snapshot and never expo
  const result=await handleApi(req('/api/review/confirm_delivery','POST',data,owner),env);assert.equal(result.status,200);assert.equal((await result.json()).delivery_confirmation.recipient_account,'customer');
  for(const path of ['/api/agent/confirm_delivery','/api/agent/claim','/api/agent/result'])assert.equal((await handleApi(req(path,'POST',data,{'X-Bid-Writer-Token':token}),env)).status,404);
  assert.equal((await handleApi(req('/api/review/claim','POST',data,owner),env)).status,404);
- const state=await (await handleApi(req('/api/state','GET',undefined,owner),env)).json();assert.deepEqual(state.sender,{enabled:false,connected:false});
+ const state=await (await handleApi(req('/api/state','GET',undefined,owner),env)).json();assert.equal(state.sender.enabled,false);assert.equal(state.sender.connected,false);assert.equal(state.sender.configured,false);
  }finally{db.close();}
 });
 

@@ -341,3 +341,24 @@ test('classic script preserves native window.open in the shared browser global n
  assert.equal(prompts,0);assert.deepEqual(io.copied,['Unsaved exact response']);assert.deepEqual(io.visits,[x.listing.canonical_url]);
  assert.equal(x.$('reply-text').value,'Unsaved exact response');assert.equal(x.pending.length,0);
 });
+
+
+test('delivery preflight stays disabled without an executor and exact owner confirmation',async()=>{
+ const x=setup();await flush();x.review.state='approved';x.review.approved_revision=1;await x.run('openEditor(state.listings[0])');
+ assert.equal(x.run('typeof preflightDeliveryFromUi'),'function','live preflight action is missing');
+ await x.run('preflightDeliveryFromUi()');assert.equal(x.pending.length,0);assert.equal(x.$('send-delivery').disabled,true);
+});
+
+test('send click confirms inspected snapshot and a lost response only offers read-only recovery',async()=>{
+ const x=setup();await flush();x.state.sender={enabled:true,configured:true};Object.assign(x.review,{state:'approved',approved_revision:1,canonical_url:x.listing.canonical_url,delivery_confirmation:{sender_account:'owner-account'}});await x.run('refresh()');
+ await x.run('openEditor(state.listings[0])');assert.equal(x.run('typeof preflightDeliveryFromUi'),'function');
+ const checking=x.run('preflightDeliveryFromUi()');await flush();assert.equal(x.pending[0].path,'/api/review/preflight');
+ const details={source_id:'fl',external_id:'0',revision:1,canonical_url:x.listing.canonical_url,text:'Saved',sender_account:'owner-account',recipient_account:'customer-account',price:100,currency:'RUB',deadline:'3 days',credit_cost:0};
+ x.pending[0].resolve({ok:true,json:async()=>({preflight_id:'p1',confirmation_digest:'digest',transport_id:'test-v1',details,expires_at:'2099-01-01T00:00:00.000Z'})});await checking;
+ let prompt='';x.context.confirm=message=>{prompt=message;return true;};const sending=x.run('sendDeliveryFromUi()');await flush();
+ assert.match(prompt,/Saved/);assert.match(prompt,/customer-account/);assert.match(prompt,/owner-account/);assert.match(prompt,/100/);assert.equal(x.pending[1].path,'/api/review/send');const body=JSON.parse(x.pending[1].options.body);
+ x.pending[1].resolve({ok:false,status:503,json:async()=>({error:'storage_unavailable'})});await sending;
+ const recovery=x.run('sendDeliveryFromUi()');await flush();assert.equal(x.pending[2].path,'/api/review/recover');assert.equal(JSON.parse(x.pending[2].options.body).operation_id,body.operation_id);
+ x.pending[2].resolve({ok:true,json:async()=>({review:{...x.review,state:'uncertain',delivery_attempt_id:body.operation_id},attempt:{operation_id:body.operation_id,status:'uncertain'}})});await recovery;
+ assert.equal(x.pending.filter(r=>r.path==='/api/review/send').length,1);assert.match(x.$('delivery-note').textContent,/неизвест|провер|неопредел/i);
+});

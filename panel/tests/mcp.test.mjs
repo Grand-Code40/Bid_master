@@ -19,7 +19,7 @@ test('MCP fails closed for absent config, anonymous, wrong identity and bearer-o
 test('discovery advertises ingest draft readback and scan diagnostics, not approval or sender',async()=>{
  const db=fixture(),env={DB:db,OWNER_USER_ID:'site-owner'};try{
  const discover=await (await handleMcp(request('server/discover'),env)).json();assert.deepEqual(discover.result.supportedVersions,['2026-07-28']);
- const listed=await (await handleMcp(request('tools/list'),env)).json();assert.deepEqual(listed.result.tools.map(x=>x.name),['bid_read_mail','bid_ingest','bid_draft','bid_record_manual_delivery','bid_readback','bid_record_scan','bid_scan_coverage','bid_record_mail','bid_observe_delivery','bid_mark_delivery_error','bid_delivery_log']);
+ const listed=await (await handleMcp(request('tools/list'),env)).json();assert.deepEqual(listed.result.tools.map(x=>x.name),['bid_read_mail','bid_ingest','bid_draft','bid_record_manual_delivery','bid_readback','bid_record_scan','bid_scan_coverage','bid_record_mail','bid_read_inbox','bid_record_platform_message','bid_observe_delivery','bid_mark_delivery_error','bid_delivery_log']);
  for(const name of ['approve','queue','claim','active','result','bid_approve'])assert.equal((await unpack(await run(env,name,{}))).body.result.isError,true);
  }finally{db.close();}
 });

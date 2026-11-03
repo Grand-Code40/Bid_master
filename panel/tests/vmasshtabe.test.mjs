@@ -20,7 +20,7 @@ test('vmasshtabe is discoverable and owner-scoped import/draft/readback preserve
  const call=async(name,args)=>{const body=await(await handleMcp(rpc('tools/call',{name,arguments:args}),env)).json();assert.equal(body.result.isError,undefined,JSON.stringify(body));return JSON.parse(body.result.content[0].text);};
  try{
   const discovery=await(await handleMcp(rpc('tools/list'),env)).json();
-  for(const tool of discovery.result.tools.filter(t=>!['bid_scan_coverage','bid_read_mail'].includes(t.name))){const p=tool.inputSchema.properties;assert.ok((p.source_id??p.observations?.items.properties.source_id??p.reference.anyOf[1].properties.source_id).enum.includes('vmasshtabe'));}
+  for(const tool of discovery.result.tools.filter(t=>!['bid_scan_coverage','bid_read_mail','bid_read_inbox'].includes(t.name))){const p=tool.inputSchema.properties;assert.ok((p.source_id??p.observations?.items.properties.source_id??p.reference.anyOf[1].properties.source_id).enum.includes('vmasshtabe'));}
   await call('bid_ingest',{observations:[{...observation,source_id:'fl',external_id:'42',canonical_url:'https://www.fl.ru/projects/42/test.html',title:'Existing fixture'}]});
   assert.equal((await call('bid_ingest',{observations:[observation]})).written,1);
   assert.equal((await call('bid_draft',{source_id:'vmasshtabe',external_id:id,operation_id:'vm-test'})).state,'draft');

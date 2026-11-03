@@ -6,10 +6,17 @@ const names={fl:'FL.ru',freelance:'Freelance.ru',telegram:'Telegram',kwork:'Kwor
 // Exact reviewed public links only; never navigate to arbitrary API-provided URLs.
 const catalogEvidenceLinks=Object.freeze({pro_pto:'https://pro-pto.ru/projects','3dtoday':'https://3dtoday.ru/board'});
 const excludedSources=new Set(['freelancer','kwork','freelancehunt']);
-const labels={draft:'Черновик',approved:'Одобрен',queued:'В очереди',sending:'Отправка начата',sent:'Отправлено',manual_sent:'Отправлено вручную',uncertain:'Нужна проверка'};
-const errors={delivery_guard:'Есть запись наблюдения отправки. Защита от повторной отправки сохраняется даже после исправления учёта.',invalid_manual_delivery:'Проверьте наблюдение, дату UTC и ссылку на переписку В Масштабе.',invalid_confirmation:'Проверьте аккаунты, цену, валюту, срок и расход отклика.',confirmation_mismatch:'Текст или получатель изменились. Проверьте сохранённую версию.',delivery_confirmation_required:'Для отправки нужно отдельное разрешение на этот текст и получателя.',stale_revision:'Сохранённая версия изменилась. Ваш текст оставлен в редакторе; скопируйте его перед загрузкой новой версии.',listing_unavailable:'Заказ закрыт или недоступен.',approval_required:'Сначала одобрите текущую версию.',review_locked:'Этот отклик заблокирован для правок.',sign_in_required:'Войдите в ChatGPT, чтобы открыть личную панель.',owner_required:'Эта панель доступна только владельцу.',site_not_configured:'Облачная панель ещё настраивается.',storage_unavailable:'Хранилище временно недоступно. Правки остаются в окне.'};
+const labels={draft:'Черновик',approved:'Одобрен',queued:'В очереди',sending:'Отправка начата',sent:'Опубликовано · проверено исполнителем',manual_sent:'Отправлено вручную',uncertain:'Нужна проверка'};
+const errors={sender_disabled:'Внешний отправщик отключён.',sender_not_configured:'Проверенный исполнитель ещё не подключён.',transport_unavailable:'Исполнитель не ответил. Это не подтверждает отсутствие отправки.',preflight_expired:'Проверка устарела. Выполните новую перед отправкой.',preflight_mismatch:'Исполнитель не подтвердил точное совпадение заказа, аккаунтов или условий.',preflight_used:'Эта проверка уже связана с попыткой отправки.',source_paused:'Источник на паузе.',attempt_not_found:'Попытка пока не обнаружена. Повторная отправка не разрешена; сохранённый номер попытки оставлен для сверки.',delivery_guard:'Есть запись наблюдения отправки. Защита от повторной отправки сохраняется даже после исправления учёта.',invalid_manual_delivery:'Проверьте наблюдение, дату UTC и ссылку на переписку В Масштабе.',invalid_confirmation:'Проверьте аккаунты, цену, валюту, срок и расход отклика.',confirmation_mismatch:'Текст или получатель изменились. Проверьте сохранённую версию.',delivery_confirmation_required:'Для отправки нужно отдельное разрешение на этот текст и получателя.',stale_revision:'Сохранённая версия изменилась. Ваш текст оставлен в редакторе; скопируйте его перед загрузкой новой версии.',listing_unavailable:'Заказ закрыт или недоступен.',approval_required:'Сначала одобрите текущую версию.',review_locked:'Этот отклик заблокирован для правок.',sign_in_required:'Войдите в ChatGPT, чтобы открыть личную панель.',owner_required:'Эта панель доступна только владельцу.',site_not_configured:'Облачная панель ещё настраивается.',storage_unavailable:'Хранилище временно недоступно. Правки остаются в окне.'};
 let state=null,selected=null,review=null,busy=false,loading=false,view='all',conflict=false,editorSession=0,preparing=false,copying=false;
 const key=x=>x.source_id+':'+x.external_id;
+let deliveryPreflight=null;
+const pendingSends=new Map();
+try{if(typeof sessionStorage!=='undefined'){const saved=JSON.parse(sessionStorage.getItem('bid-master-pending-sends')||'[]');if(Array.isArray(saved))for(const entry of saved)if(Array.isArray(entry)&&entry.length===2&&entry.every(x=>typeof x==='string')&&/^[A-Za-z0-9_-]{1,128}$/.test(entry[1]))pendingSends.set(entry[0],entry[1]);}}catch{}
+const deliveryKey=row=>key(row)+':'+row.revision;
+function persistPending(){try{if(typeof sessionStorage!=='undefined')sessionStorage.setItem('bid-master-pending-sends',JSON.stringify([...pendingSends].slice(-100)));}catch{}}
+const pendingAttempt=()=>review&&(pendingSends.get(deliveryKey(review))||(['sending','uncertain'].includes(review.state)?review.delivery_attempt_id:null));
+
 const dirty=()=>Boolean(review&&$('reply-text').value!==review.text);
 function node(tag,text,cls){const x=document.createElement(tag);if(text!==undefined)x.textContent=text;if(cls)x.className=cls;return x;}
 function when(value){if(!value)return 'ещё не было';return new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Moscow'}).format(new Date(value))+' МСК';}
@@ -82,7 +89,14 @@ function renderEditor(){
  $('confirm-delivery').disabled=busy||conflict||!available||dirty();
  $('manual-delivery-record').hidden=!review?.manual_delivery;
  $('manual-delivery-record').textContent=review?.manual_delivery?'Отправлено вручную · наблюдение '+when(review.manual_delivery.observed_at)+' · '+review.manual_delivery.observation+' · '+review.manual_delivery.delivery_url+' · Прочтение заказчиком не подтверждено.':'';
- $('delivery-note').textContent='Отправитель отключён: эта версия не отправляет сообщения. '+(review?.delivery_confirmation?'Отдельное разрешение сохранено для точного текста, аккаунта и получателя.':'Одобрение текста и очередь сами по себе не являются разрешением отправки.');
+ const supported=['fl','freelance'].includes(review?.source_id),configured=Boolean(state?.sender?.enabled&&state.sender.configured),pending=pendingAttempt();
+ if(deliveryPreflight&&(!review||deliveryPreflight.details.revision!==review.revision||deliveryPreflight.details.text!==review.text||dirty()))deliveryPreflight=null;
+ $('preflight-delivery').disabled=busy||conflict||dirty()||!supported||!configured||!review?.delivery_confirmation||Boolean(pending);
+ $('send-delivery').hidden=!deliveryPreflight;$('send-delivery').disabled=busy||conflict||dirty()||!deliveryPreflight||Boolean(pending);
+ $('preflight-details').hidden=!deliveryPreflight;
+ $('preflight-details').textContent=deliveryPreflight?deliverySummary(deliveryPreflight.details)+'\nИсполнитель: '+deliveryPreflight.transport_id+'\nПроверка действует до '+when(deliveryPreflight.expires_at):'';
+ $('recover-delivery').hidden=!pending;$('recover-delivery').disabled=busy;
+ $('delivery-note').textContent=pending?'Результат отправки неизвестен или ещё проверяется. Повторная отправка заблокирована. Проверка результата не отправляет отклик повторно.':review?.state==='sent'?(review.evidence||'Публикация подтверждена исполнителем. Прочтение не подтверждено.'):!supported?(review?.source_id==='weblancer'?'Weblancer на паузе.':'Для этого источника автоматическая отправка не подключена.'):(configured?'Исполнитель настроен. Нужна свежая проверка сессии, заказа, формы и исходящих.':'Отправитель отключён: проверенный внешний исполнитель не подключён.')+' Одобрение текста и очередь не означают отправку.';
 }
 async function copyReply(){
  if(copying||!review||!$('reply-text').value.trim())return;
@@ -120,10 +134,10 @@ async function copyAndOpenReply(){
   if(session===editorSession)notice('Не удалось скопировать автоматически. Текст остался в редакторе: выделите и скопируйте его вручную, затем нажмите «Открыть на площадке».',true);
  }finally{copying=false;renderEditor();}
 }
-function accept(row){review=row;conflict=false;$('reply-text').value=row.text;if(state)state.reviews=state.reviews.filter(x=>key(x)!==key(row)).concat(row);}
+function accept(row){deliveryPreflight=null;review=row;conflict=false;$('reply-text').value=row.text;if(state)state.reviews=state.reviews.filter(x=>key(x)!==key(row)).concat(row);}
 async function openEditor(item){
  if(busy||dirty()&&!confirm('Несохранённые правки будут потеряны. Открыть другой заказ?'))return;
- const session=++editorSession;notice('');for(const id of ['sender-account','recipient-account','delivery-price','delivery-currency','delivery-deadline'])$(id).value='';$('delivery-credit').value='0';selected=item;review=state.reviews.find(x=>key(x)===key(item))??null;conflict=false;$('reply-text').value=review?.text??'';renderEditor();renderList();if(!$('editor-panel').open)$('editor-panel').showModal();document.body.classList.add('dialog-open');document.querySelector('.editor-scroll').scrollTop=0;$('details-title').focus({preventScroll:true});
+ const session=++editorSession;deliveryPreflight=null;notice('');for(const id of ['sender-account','recipient-account','delivery-price','delivery-currency','delivery-deadline'])$(id).value='';$('delivery-credit').value='0';selected=item;review=state.reviews.find(x=>key(x)===key(item))??null;conflict=false;$('reply-text').value=review?.text??'';renderEditor();renderList();if(!$('editor-panel').open)$('editor-panel').showModal();document.body.classList.add('dialog-open');document.querySelector('.editor-scroll').scrollTop=0;$('details-title').focus({preventScroll:true});
  if(!review&&item.listing_kind==='order'&&item.availability!=='closed'){
   busy=true;preparing=true;renderEditor();try{const row=await call('/api/review/prepare',{source_id:item.source_id,external_id:item.external_id});if(session===editorSession)accept(row);}catch(e){if(session===editorSession)notice(e.message,true);}finally{if(session===editorSession){busy=false;preparing=false;}}
  }
@@ -135,7 +149,7 @@ async function act(action){
   const identity={source_id:review.source_id,external_id:review.external_id};
   if(action==='save'||action==='approve'&&dirty()){const row=await call('/api/review/save',{...identity,revision:review.revision,text:$('reply-text').value});if(session!==editorSession)return;accept(row);}
   if(action!=='save'){const row=await call('/api/review/'+action,{...identity,revision:review.revision});if(session!==editorSession)return;accept(row);}
-  notice('Сохранено в облачной базе.');
+  notice(action==='queue'?'Отклик в очереди. Сообщение не отправлено.':'Сохранено в облачной базе.');
  }catch(e){if(session===editorSession){notice(e.message,true);conflict=true;}}finally{if(session===editorSession){busy=false;renderEditor();renderList();}}
 }
 async function confirmDeliveryFromUi(){
@@ -144,11 +158,41 @@ async function confirmDeliveryFromUi(){
  const val=id=>$(id).value.trim();
  const details={source_id:review.source_id,external_id:review.external_id,canonical_url:review.canonical_url,text:review.text,revision:review.revision,sender_account:val('sender-account'),recipient_account:val('recipient-account'),price:val('delivery-price')?Number(val('delivery-price')):null,currency:val('delivery-currency')?val('delivery-currency').toUpperCase():null,deadline:val('delivery-deadline')||null,credit_cost:Number(val('delivery-credit'))};
  if(!details.sender_account||!details.recipient_account){notice('Укажите точные аккаунты отправителя и заказчика.',true);return;}
- const message=`Разрешить одну отправку именно этого отклика?\n\nВаш аккаунт: ${details.sender_account}\nЗаказчик: ${details.recipient_account}\nПроект: ${details.canonical_url}\nЦена: ${details.price??'не требуется'} ${details.currency??''}\nСрок: ${details.deadline??'не требуется'}\nРасход имеющихся откликов: ${details.credit_cost}\n\n${details.text}\n\nОтправитель пока отключён. Покупки и подписки не разрешаются. Для отправки нужны отдельное подключение и проверка сессии.`;
+ const message=`Разрешить одну отправку именно этого отклика?\n\nВаш аккаунт: ${details.sender_account}\nЗаказчик: ${details.recipient_account}\nПроект: ${details.canonical_url}\nЦена: ${details.price??'не требуется'} ${details.currency??''}\nСрок: ${details.deadline??'не требуется'}\nРасход имеющихся откликов: ${details.credit_cost}\n\n${details.text}\n\nПокупки и подписки не разрешаются. Это сохранение точных условий. Отправка потребует свежей проверки исполнителя и отдельного финального нажатия.`;
  if(!confirm(message))return;
  busy=true;renderEditor();
  try{const row=await call('/api/review/confirm_delivery',{source_id:review.source_id,external_id:review.external_id,revision:review.revision,details});if(session!==editorSession)return;accept(row);notice('Разрешение сохранено. Сообщение не отправлено.');}
  catch(e){if(session===editorSession)notice(e.message,true);}
+ finally{if(session===editorSession){busy=false;renderEditor();renderList();}}
+}
+function deliverySummary(details){return 'Ваш аккаунт: '+details.sender_account+'\nЗаказчик: '+details.recipient_account+'\nЗаказ: '+details.canonical_url+'\nЦена: '+(details.price??'не требуется')+' '+(details.currency??'')+'\nСрок: '+(details.deadline??'не требуется')+'\nРасход имеющихся откликов: '+details.credit_cost+'\n\n'+details.text;}
+async function deliveryPost(path,data){
+ const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}),body=await r.json();
+ if(!r.ok){const error=new Error(errors[body.error]??body.error??'Не удалось проверить результат.');error.definite=body.attempt_started===false;throw error;}return body;
+}
+async function preflightDeliveryFromUi(){
+ if(!review||busy||conflict||dirty()||!review.delivery_confirmation||!['approved','queued'].includes(review.state)||!['fl','freelance'].includes(review.source_id)||!state?.sender?.enabled||!state.sender.configured||pendingAttempt())return;
+ const session=editorSession,identity={source_id:review.source_id,external_id:review.external_id,revision:review.revision};busy=true;renderEditor();
+ try{const result=await deliveryPost('/api/review/preflight',identity);if(session!==editorSession)return;deliveryPreflight=result;notice('Исполнитель проверил точные условия. Сверьте аккаунты, заказ и весь текст перед финальным нажатием. Сообщение ещё не отправлено.');}
+ catch(error){if(session===editorSession){deliveryPreflight=null;notice(error.message,true);}}
+ finally{if(session===editorSession){busy=false;renderEditor();}}
+}
+async function sendDeliveryFromUi(){
+ if(pendingAttempt())return recoverDeliveryFromUi();
+ if(!review||busy||conflict||dirty()||!deliveryPreflight||!['approved','queued'].includes(review.state))return;
+ const proof=deliveryPreflight;
+ if(!confirm('Отправить ОДИН раз именно этот отклик?\n\n'+deliverySummary(proof.details)+'\n\nПокупки и подписки не разрешаются. После начала отправки отмена не гарантирует отзыв сообщения.'))return;
+ const session=editorSession,storageKey=deliveryKey(review),operation_id=crypto.randomUUID();
+ const args={source_id:review.source_id,external_id:review.external_id,revision:review.revision,operation_id,preflight_id:proof.preflight_id,confirmation_digest:proof.confirmation_digest};
+ pendingSends.set(storageKey,operation_id);persistPending();busy=true;renderEditor();
+ try{const result=await deliveryPost('/api/review/send',args);if(['sent','not_sent'].includes(result.attempt.status)){pendingSends.delete(storageKey);persistPending();}if(session!==editorSession)return;accept(result.review);notice(result.attempt.status==='sent'?'Публикация проверена исполнителем. Прочтение заказчиком не подтверждено.':result.attempt.status==='not_sent'?'Исполнитель подтвердил, что внешнее действие не начиналось. Для новой попытки нужно новое одобрение.':'Результат не подтверждён. Повторная отправка заблокирована.',result.attempt.status==='uncertain');}
+ catch(error){if(error.definite){pendingSends.delete(storageKey);persistPending();}if(session===editorSession)notice(error.definite?error.message:'Результат запроса неизвестен. Сохранён номер попытки. Используйте проверку результата без повторной отправки.',true);}
+ finally{if(session===editorSession){busy=false;renderEditor();renderList();}}
+}
+async function recoverDeliveryFromUi(){
+ const operation_id=pendingAttempt();if(!operation_id||busy)return;const session=editorSession,storageKey=deliveryKey(review);busy=true;renderEditor();
+ try{const result=await deliveryPost('/api/review/recover',{operation_id});if(['sent','not_sent'].includes(result.attempt.status)){pendingSends.delete(storageKey);persistPending();}if(session!==editorSession)return;accept(result.review);notice(result.attempt.status==='sent'?'Точный опубликованный отклик найден исполнителем. Повторной отправки не было.':'Проверка завершена без повторной отправки. Текущее состояние: '+(labels[result.review.state]??result.review.state),result.attempt.status==='uncertain');}
+ catch(error){if(session===editorSession)notice(error.message,true);}
  finally{if(session===editorSession){busy=false;renderEditor();renderList();}}
 }
 async function refresh(){
@@ -176,7 +220,7 @@ async function refresh(){
   }));
   const coverage=next.scan?.coverage;
   $('scan-coverage').textContent=coverage?'Цикл '+coverage.run_id+': записано '+coverage.recorded+' из '+coverage.expected+' источников; нет отчёта: '+coverage.missing+'; проверено с результатом или пусто: '+coverage.completed+'. Заблокировано: '+coverage.status_counts.blocked+', нужен вход: '+coverage.status_counts.auth_required+', ошибок: '+coverage.status_counts.error+', пропущено: '+coverage.status_counts.skipped+'. Успешных проверок главной/раздела: '+(coverage.completed_source_checks??'неизвестно')+'. Области всех отчётов — единичных карточек: '+(coverage.scope_counts?.single_item??'неизвестно')+'; область неизвестна: '+(coverage.scope_counts?.legacy_unknown??'неизвестно')+'. Это отчёт dot, не гарантия работы источников.':'Циклы проверок ещё не записаны. Сохранённые карточки не подтверждают проверку всех источников.';
-  $('monitor-status').textContent='Регулярное расписание пока не подключено.';$('agent-status').textContent='Dot может добавлять карточки через защищённый импорт. Отправка откликов отключена.';
+  $('monitor-status').textContent='Регулярное расписание пока не подключено.';$('agent-status').textContent=next.sender?.enabled&&next.sender.configured?'Исполнитель настроен; каждый отклик требует проверки и отдельного нажатия владельца. Фоновая отправка не выполняется.':'Dot может добавлять карточки через защищённый импорт. Проверенный отправщик пока не подключён.';
   $('scan-button').disabled=false;
   if(selected){selected=next.listings.find(x=>key(x)===key(selected))??selected;const incoming=next.reviews.find(x=>key(x)===key(selected));if(incoming&&JSON.stringify(incoming)!==JSON.stringify(review)){if(dirty())conflict=true;else accept(incoming);}}
   renderList();renderEditor();
@@ -187,11 +231,14 @@ for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>
 for(const action of ['save','approve','queue','cancel'])$(action+'-reply').onclick=()=>act(action);
 $('reply-text').oninput=renderEditor;
 $('confirm-delivery').onclick=confirmDeliveryFromUi;
+$('preflight-delivery').onclick=preflightDeliveryFromUi;
+$('send-delivery').onclick=sendDeliveryFromUi;
+$('recover-delivery').onclick=recoverDeliveryFromUi;
 $('reload-reply').onclick=()=>{if(dirty()&&!confirm('Заменить текст сохранённой версией? Сначала скопируйте нужные правки.'))return;const row=state.reviews.find(x=>key(x)===key(selected));if(row)accept(row);renderEditor();};
 function closeEditor(){
  const warning=busy&&!preparing?'Действие ещё выполняется. Закрыть окно? Уже отправленный запрос продолжит выполняться.':dirty()?'Несохранённые правки будут потеряны. Закрыть отклик?':'';
  if(warning&&!confirm(warning))return;
- const previousKey=selected&&key(selected);++editorSession;preparing=false;busy=false;selected=null;review=null;conflict=false;
+ const previousKey=selected&&key(selected);deliveryPreflight=null;++editorSession;preparing=false;busy=false;selected=null;review=null;conflict=false;
  $('editor-panel').close();document.body.classList.remove('dialog-open');renderList();
  const listing=[...document.querySelectorAll('.listing')].find(row=>row.dataset.listingKey===previousKey);
  (listing?.querySelector('.listing-action')||$('search')).focus({preventScroll:true});
