@@ -22,11 +22,15 @@ export class ReviewStore {
   const operation=command.operation_id;
   if(typeof operation!=='string'|| !/^[A-Za-z0-9_-]{1,128}$/.test(operation))fail('invalid_operation');
   const requestHash=await hash([source,id,command.action,command.revision??null,command.text??null,command.outcome??null,command.evidence??null,command.delivery_url??null,command.claim_token??null,...(['confirm_delivery','record_manual_delivery'].includes(command.action)?[command.details??null]:[])]);
-  const previous=await this.db.prepare('SELECT * FROM review_events WHERE owner_id=? AND operation_id=?').bind(owner,operation).first();
-  if(previous){if(previous.request_hash!==requestHash)fail('operation_conflict');
+  const replay=async()=>{
+   const previous=await this.db.prepare('SELECT * FROM review_events WHERE owner_id=? AND operation_id=?').bind(owner,operation).first();
+   if(!previous)return null;
+   if(previous.request_hash!==requestHash)fail('operation_conflict');
    if(command.action==='claim'){const current=await this.get(owner,source,id);if(current?.last_operation===operation)return current.data;fail('claim_already_resolved');}
    return JSON.parse(previous.data);
-  }
+  };
+  const previous=await replay();if(previous)return previous;
+  try {
   const old=await this.get(owner,source,id);if(!old)fail('review_not_found');
   if(old.data.state==='manual_sent'||old.data.manual_delivery)fail('review_locked');
   if(['approve','queue','confirm_delivery','claim'].includes(command.action)&&!eligible(await this.listing(owner,source,id)))fail('listing_unavailable');
@@ -36,12 +40,18 @@ export class ReviewStore {
   const next=command.action==='confirm_delivery'?confirmDelivery(old.data,command.details,ctx):command.action==='claim'?claimDelivery(old.data,ctx):transition(old.data,command,command.action==='result'?{...ctx,role:'agent'}:ctx);
   const needsEligible=['approve','queue','confirm_delivery','claim'].includes(command.action);
   const statements=[
-   this.db.prepare("UPDATE reviews SET data=?,storage_version=storage_version+1,last_operation=? WHERE owner_id=? AND source_id=? AND external_id=? AND storage_version=? AND (?=0 OR NOT EXISTS (SELECT 1 FROM delivery_records d WHERE d.owner_id=reviews.owner_id AND d.source_id=reviews.source_id AND d.external_id=reviews.external_id)) AND (?=0 OR EXISTS (SELECT 1 FROM listings l WHERE l.owner_id=reviews.owner_id AND l.source_id=reviews.source_id AND l.external_id=reviews.external_id AND json_extract(l.data,'$.listing_kind')='order' AND json_extract(l.data,'$.availability')!='closed'))").bind(JSON.stringify(next),operation,owner,source,id,old.storage_version,needsGuard?1:0,needsEligible?1:0),
-   this.db.prepare('INSERT INTO review_events (owner_id,operation_id,source_id,external_id,action,at,data,request_hash) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM reviews WHERE owner_id=? AND source_id=? AND external_id=? AND last_operation=? AND storage_version=?)').bind(owner,operation,source,id,command.action,ctx.now,JSON.stringify(publicReview(next)),requestHash,owner,source,id,operation,old.storage_version+1)
+   this.db.prepare("UPDATE reviews SET data=?,storage_version=storage_version+1,last_operation=? WHERE owner_id=? AND source_id=? AND external_id=? AND storage_version=? AND (?=0 OR NOT EXISTS (SELECT 1 FROM delivery_records d WHERE d.owner_id=reviews.owner_id AND d.source_id=reviews.source_id AND d.external_id=reviews.external_id)) AND (?=0 OR EXISTS (SELECT 1 FROM listings l WHERE l.owner_id=reviews.owner_id AND l.source_id=reviews.source_id AND l.external_id=reviews.external_id AND json_extract(l.data,'$.listing_kind')='order' AND json_extract(l.data,'$.availability')!='closed')) AND NOT EXISTS (SELECT 1 FROM review_events e WHERE e.owner_id=reviews.owner_id AND e.operation_id=?)").bind(JSON.stringify(next),operation,owner,source,id,old.storage_version,needsGuard?1:0,needsEligible?1:0,operation),
+   this.db.prepare('INSERT INTO review_events (owner_id,operation_id,source_id,external_id,action,at,data,request_hash) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM reviews WHERE owner_id=? AND source_id=? AND external_id=? AND last_operation=? AND storage_version=?) AND NOT EXISTS (SELECT 1 FROM review_events WHERE owner_id=? AND operation_id=?)').bind(owner,operation,source,id,command.action,ctx.now,JSON.stringify(publicReview(next)),requestHash,owner,source,id,operation,old.storage_version+1,owner,operation)
   ];
   const result=await this.db.batch(statements);
   if(result[0].meta.changes!==1)fail('stale_revision');
   return command.action==='claim'?next:publicReview(next);
+  }catch(error){
+   // An identical request may have committed after the first replay lookup.
+   // Recover its durable result; never promote a changed request to a retry.
+   const committed=await replay();if(committed)return committed;
+   throw error;
+  }
  }
  async claimNext(owner,source,operation,ctx){
   if(ctx?.role!=='sender')fail('sender_required');

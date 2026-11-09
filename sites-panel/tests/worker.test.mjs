@@ -6,7 +6,7 @@ test('bundled Worker routes MCP through owner checks without exposing approval t
  const db=fixture(),env={DB:db,OWNER_USER_ID:'owner'};
  try{const body=JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'});
  const denied=await worker.fetch(new Request('https://test/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body}),env);assert.equal(denied.status,401);
- const accepted=await worker.fetch(new Request('https://test/mcp',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':'owner'},body}),env);assert.equal(accepted.status,200);assert.deepEqual((await accepted.json()).result.tools.map(x=>x.name),['bid_read_mail','bid_ingest','bid_draft','bid_record_manual_delivery','bid_readback','bid_record_scan','bid_scan_coverage','bid_record_mail','bid_link_mail_conversation','bid_observe_delivery','bid_mark_delivery_error','bid_delivery_log']);
+ const accepted=await worker.fetch(new Request('https://test/mcp',{method:'POST',headers:{'Content-Type':'application/json','oai-authenticated-user-id':'owner'},body}),env);assert.equal(accepted.status,200);assert.deepEqual((await accepted.json()).result.tools.map(x=>x.name),['bid_read_mail','bid_ingest','bid_draft','bid_record_manual_delivery','bid_readback','bid_record_scan','bid_scan_coverage','bid_record_mail','bid_link_mail_conversation','bid_read_inbox','bid_record_platform_message','bid_observe_delivery','bid_mark_delivery_error','bid_delivery_log']);
  }finally{db.close();}
 });
 test('bundled Worker protects HTML and serves only self-contained client assets',async()=>{

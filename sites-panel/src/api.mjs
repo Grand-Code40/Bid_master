@@ -1,3 +1,6 @@
+import {senderStatus,preflightDelivery,sendDelivery,recoverDelivery} from './dispatch.mjs';
+import {inboxChannels,syncMail} from './mail-sync.mjs';
+import {recordPlatformMessage,listUnifiedInbox,markMessageViewed} from './messages.mjs';
 import {deliveryAct,deliveryLog,listSent} from './delivery.mjs';
 import {listMail,markMailViewed} from './inbox.mjs';
 import {candidateWarnings} from './candidates.mjs';
@@ -41,7 +44,10 @@ export async function handleApi(request,env){
    const identity=request.headers.get('oai-authenticated-user-id');if(!identity)reject('sign_in_required',401);
    if(identity!==env.OWNER_USER_ID)reject('owner_required',403);
   }
-  const store=new ReviewStore(env.DB),owner=env.OWNER_USER_ID,now=new Date().toISOString();
+  const store=new ReviewStore(env.DB),owner=env.OWNER_USER_ID,now=new Date().toISOString(),trustedClock=()=>new Date().toISOString();
+  if(request.method==='GET'&&path==='/api/sender/status')return response(senderStatus(env));
+  if(request.method==='GET'&&path==='/api/inbox/channels'){if(url.search)reject('invalid_request',400);return response(await inboxChannels(env.DB,owner,env,now));}
+  if(request.method==='GET'&&path==='/api/inbox/unified'){if([...url.searchParams.keys()].some(k=>k!=='cursor')||url.searchParams.getAll('cursor').length>1)reject('invalid_request',400);return response(await listUnifiedInbox(env.DB,owner,url.searchParams.get('cursor')));}
   if(request.method==='GET'&&path==='/api/sent'){if([...url.searchParams.keys()].some(k=>k!=='cursor')||url.searchParams.getAll('cursor').length>1)reject('invalid_request',400);return response(await listSent(env.DB,owner,url.searchParams.get('cursor')));}
   if(request.method==='GET'&&path==='/api/delivery-log'){if([...url.searchParams.keys()].length!==2||url.searchParams.getAll('source_id').length!==1||url.searchParams.getAll('external_id').length!==1)reject('invalid_delivery_record',400);return response(await deliveryLog(env.DB,owner,Object.fromEntries(url.searchParams)));}
   if(request.method==='GET'&&path==='/api/inbox'){if([...url.searchParams.keys()].some(k=>k!=='cursor')||url.searchParams.getAll('cursor').length>1)reject('invalid_mail',400);return response(await listMail(env.DB,owner,url.searchParams.get('cursor')));}
@@ -50,12 +56,22 @@ export async function handleApi(request,env){
    const checks=await latestScans(env.DB,owner),sources=publicSources(state.listings,checks);
    const latest=checks.slice().sort((a,b)=>a.checked_at.localeCompare(b.checked_at)||a.run_id.localeCompare(b.run_id)).at(-1);
    const coverage=latest?await scanCoverage(env.DB,owner,{run_id:latest.run_id}):null;
-   return response({...state,candidate_check:await candidateWarnings(env.DB,owner),sender:{enabled:false,connected:false},sources,scan:{running:false,error:null,result:null,coverage},monitor:{enabled:false,interval_minutes:30,next_run_at:null,supported:false},agent:{last_seen:null},summary:{total:state.listings.length,orders:orders.length,vacancies:state.listings.filter(x=>x.listing_kind==='vacancy').length,priced_orders:orders.filter(x=>x.budget_min!=null||x.budget_max!=null).length}});
+   return response({...state,candidate_check:await candidateWarnings(env.DB,owner),sender:senderStatus(env),sources,scan:{running:false,error:null,result:null,coverage},monitor:{enabled:false,interval_minutes:30,next_run_at:null,supported:false},agent:{last_seen:null},summary:{total:state.listings.length,orders:orders.length,vacancies:state.listings.filter(x=>x.listing_kind==='vacancy').length,priced_orders:orders.filter(x=>x.budget_min!=null||x.budget_max!=null).length}});
   }
   if(request.method==='GET'&&path==='/api/scan-coverage'){if([...url.searchParams.keys()].some(k=>k!=='run_id')||url.searchParams.getAll('run_id').length!==1)reject('invalid_scan',400);return response(await scanCoverage(env.DB,owner,{run_id:url.searchParams.get('run_id')}));}
   if(request.method!=='POST')reject('not_found',404);
   if(!agent&&request.headers.get('Origin')!==url.origin)reject('invalid_origin',403);
   const data=await body(request,path==='/api/agent/ingest'?4*1024*1024:40000);
+  if(path==='/api/review/preflight')return response(await preflightDelivery(env.DB,owner,data,env,trustedClock));
+  if(path==='/api/review/send')return response(await sendDelivery(env.DB,owner,data,env,trustedClock));
+  if(path==='/api/review/recover')return response(await recoverDelivery(env.DB,owner,data,env,trustedClock));
+  if(path==='/api/inbox/platform-message')return response(await recordPlatformMessage(env.DB,owner,data,now));
+  if(path==='/api/inbox/message-viewed')return response(await markMessageViewed(env.DB,owner,data,now));
+  if(path==='/api/inbox/sync'){
+   if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).length!==1||typeof data.channel!=='string')reject('invalid_request',400);
+   if(data.channel==='weblancer')reject('source_paused',409);if(data.channel!=='gmail')reject('source_unsupported',409);
+   return response(await syncMail(env.DB,owner,env,trustedClock));
+  }
   if(path==='/api/delivery-log/observe'||path==='/api/delivery-log/mark-error')return response(await deliveryAct(env.DB,owner,data,path.endsWith('/observe')?'observe':'mark_error',{role:'owner',now}));
   if(path==='/api/inbox/viewed')return response(await markMailViewed(env.DB,owner,data,now));
   if(path==='/api/agent/ingest')return response(await ingestObservations(env.DB,owner,data,now));
@@ -71,9 +87,9 @@ export async function handleApi(request,env){
   if(action==='prepare')return response(await store.prepare(owner,data.source_id,data.external_id,now,data.operation_id));
   return response(await store.act(owner,data.source_id,data.external_id,{action,revision:data.revision,text:data.text,details:data.details,operation_id:data.operation_id},{role:agent?'agent':'owner',now}));
  }catch(error){
-  const conflicts=['delivery_guard','delivery_record_exists','stale_revision','review_locked','approval_required','listing_unavailable','operation_conflict','ingest_conflict','confirmation_mismatch','delivery_confirmation_required'];
-  const invalid=['invalid_delivery_record','mail_auth_content','mail_secret_content','mail_unsafe_link','invalid_mail','invalid_scan','invalid_request','invalid_operation','invalid_observation','invalid_text','invalid_confirmation','invalid_manual_delivery'];
-  const status=error.status??(conflicts.includes(error.message)?409:invalid.includes(error.message)?400:['delivery_record_not_found','mail_not_found','review_not_found'].includes(error.message)?404:503);
-  return response({error:status===503&&!error.status?'storage_unavailable':error.message},status);
+  const conflicts=['sender_disabled','sender_not_configured','source_paused','source_unsupported','source_not_supported','preflight_mismatch','preflight_required','preflight_expired','preflight_used','transport_changed','transport_unavailable','message_conflict','delivery_guard','delivery_record_exists','stale_revision','review_locked','approval_required','listing_unavailable','operation_conflict','ingest_conflict','confirmation_mismatch','delivery_confirmation_required'];
+  const invalid=['invalid_dispatch','invalid_sync_time','invalid_message','invalid_message_cursor','invalid_delivery_record','mail_auth_content','mail_secret_content','mail_unsafe_link','invalid_mail','invalid_scan','invalid_request','invalid_operation','invalid_observation','invalid_text','invalid_confirmation','invalid_manual_delivery'];
+  const status=error.status??(conflicts.includes(error.message)?409:invalid.includes(error.message)?400:['attempt_not_found','message_not_found','message_listing_not_found','delivery_record_not_found','mail_not_found','review_not_found'].includes(error.message)?404:503);
+  return response({error:status===503&&!error.status?'storage_unavailable':error.message,...(error.attempt_started===false?{attempt_started:false}:{})},status);
  }
 }
