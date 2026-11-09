@@ -1,0 +1,10 @@
+build/
+dist/
+node_modules/
+.npm-cache/
+.env
+.env.*
+*.sqlite*
+*.db
+*.log
+.openai/hosting.json
