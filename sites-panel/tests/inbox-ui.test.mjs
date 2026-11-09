@@ -15,10 +15,10 @@ const flush=()=>new Promise(r=>setImmediate(r));
 const malicious={mailbox:'test@example.test',message_id:'abcd',subject:'<img src=https://evil.test onerror=alert(1)>',sender:'<script>alert(1)</script>',plain_text:'<iframe src=https://evil.test>hello</iframe>',received_at:'2026-11-01T00:00:00.000Z',link_status:'unlinked',panel_viewed_at:null};
 test('inbox client exists as independent safe renderer',()=>assert.equal(existsSync(file),true));
 test('untrusted notification is rendered as text only and mark-viewed requires an explicit click',async()=>{
- const x=setup();assert.equal(x.pending[0].url,'/api/inbox');x.pending[0].resolve({ok:true,json:async()=>({messages:[malicious],next_cursor:null})});await flush();
+ const x=setup();assert.equal(x.pending[0].url,'/api/inbox/unified');x.pending[0].resolve({ok:true,json:async()=>({messages:[malicious],next_cursor:null})});await flush();
  const tree=[];function walk(n){tree.push(n);for(const c of n.children??[])walk(c);}walk(x.$('inbox-unlinked'));
  assert.ok(tree.some(n=>n.textContent===malicious.subject));assert.ok(tree.some(n=>n.textContent===malicious.plain_text));assert.equal(tree.some(n=>['img','iframe','script'].includes(n.tagName)),false);assert.equal(x.pending.length,1);
- const button=tree.find(n=>n.tagName==='button');const work=button.onclick();assert.equal(x.pending[1].url,'/api/inbox/viewed');assert.equal(button.disabled,true);
+ const button=tree.find(n=>n.tagName==='button');const work=button.onclick();assert.equal(x.pending[1].url,'/api/inbox/message-viewed');assert.equal(button.disabled,true);
  x.pending[1].resolve({ok:true,json:async()=>({panel_viewed:true})});await work;
  assert.equal(x.pending.length,2);
 });
@@ -83,4 +83,24 @@ test('link enrichment updates an open card without losing text selection, and re
  x.timers[0]();reply(x.pending[1],[{...malicious,conversation_url:'https://vmasshtabe.ru/account/view-task?id=1&response_id=2&token=secret'}]);await flush();
  const links=()=>card.children.flatMap(n=>n.children??[]).filter(n=>n.tagName==='a');assert.equal(links().length,0);
  x.timers[0]();reply(x.pending[2],[{...malicious,conversation_url:'https://vmasshtabe.ru/account/view-task?id=1&response_id=2'}]);await flush();assert.equal(x.$('inbox-unlinked').children[0],card);assert.equal(details.open,true);assert.equal(links().length,1);
+});
+test('unified inbox keeps separate platform accounts and labels notification provenance honestly',async()=>{
+ const x=setup();assert.equal(x.pending[0].url,'/api/inbox/unified','unified Inbox read is missing');
+ const platform={message_key:JSON.stringify(['platform','fl','account-one','m1']),kind:'platform_message',provenance:'caller_observed',source_id:'fl',external_id:'42',account_id:'account-one',message_id:'m1',sender:'Customer',plain_text:'Question about layers',received_at:'2026-11-01T00:00:00.000Z',recorded_at:'2026-11-01T00:00:01.000Z',link_status:'exact_url'};
+ const second={...platform,account_id:'account-two',message_key:JSON.stringify(['platform','fl','account-two','m1'])};
+ const mail={...malicious,kind:'email_notification',provenance:'provider_verified',receipt_to_storage_ms:2000};
+ reply(x.pending[0],[platform,second,mail]);await flush();assert.equal(x.$('inbox-count').textContent,'3');
+ const texts=[];function walk(n){if(n.textContent)texts.push(n.textContent);for(const child of n.children??[])walk(child);}walk(x.$('inbox-linked'));walk(x.$('inbox-unlinked'));
+ assert.ok(texts.some(t=>t.includes('Сообщение площадки')));assert.ok(texts.some(t=>t.includes('Gmail API')));assert.ok(texts.some(t=>t.includes('не полная переписка')));assert.ok(texts.some(t=>t.includes('2 с')));
+ const mark=x.$('inbox-linked').children[0].children.find(n=>n.tagName==='button').onclick();assert.equal(x.pending[1].url,'/api/inbox/message-viewed');assert.equal(JSON.parse(x.pending[1].options.body).message_key,platform.message_key);x.pending[1].resolve({ok:true});await mark;
+});
+
+
+for(const finished of [false,true])test('explicit refresh restarts historical traversal after '+(finished?'exhausted':'partial')+' pagination',async()=>{
+ const x=setup(),mail=n=>({...malicious,message_id:n.toString(16),subject:'message '+n}),batch=(start,count)=>Array.from({length:count},(_,i)=>mail(start-i));
+ reply(x.pending[0],batch(200,100),'cursor-101');await flush();x.$('inbox-more').onclick();reply(x.pending[1],batch(100,100),finished?null:'cursor-51');await flush();
+ const card=x.$('inbox-unlinked').children[0],details=card.children.find(n=>n.tagName==='details');details.open=true;
+ x.$('inbox-refresh').onclick();reply(x.pending[2],batch(200,100),'cursor-101');await flush();assert.equal(x.$('inbox-more').hidden,false);
+ x.$('inbox-more').onclick();assert.match(x.pending[3].url,/cursor-101/);const older={...mail(999),received_at:'2026-10-31T00:00:00.000Z'};reply(x.pending[3],[older,...batch(100,99)],null);await flush();
+ assert.equal(x.$('inbox-count').textContent,'201');assert.equal(details.open,true);assert.equal(x.$('inbox-unlinked').children.includes(card),true);
 });

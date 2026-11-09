@@ -29,6 +29,13 @@
       "when": 1793700753733,
       "tag": "0003_woozy_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793727557318,
+      "tag": "0004_chubby_supreme_intelligence",
+      "breakpoints": true
     }
   ]
 }

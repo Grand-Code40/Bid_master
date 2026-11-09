@@ -37,3 +37,15 @@ export const deliveryEvents=sqliteTable('delivery_events',{
  ownerId:text('owner_id').notNull(),operationId:text('operation_id').notNull(),sourceId:text('source_id').notNull(),externalId:text('external_id').notNull(),
  version:integer('version').notNull(),action:text('action').notNull(),at:text('at').notNull(),data:text('data').notNull(),requestHash:text('request_hash').notNull(),
 },t=>[primaryKey({columns:[t.ownerId,t.operationId]}),check('delivery_events_data_json',sql`json_valid(${t.data})`),uniqueIndex('delivery_events_version').on(t.ownerId,t.sourceId,t.externalId,t.version)]);
+
+
+// Additive preflight and durable one-attempt delivery records.
+export const deliveryPreflights=sqliteTable('delivery_preflights',{
+ ownerId:text('owner_id').notNull(),id:text('id').notNull(),sourceId:text('source_id').notNull(),externalId:text('external_id').notNull(),
+ revision:integer('revision').notNull(),storageVersion:integer('storage_version').notNull(),data:text('data').notNull(),expiresAt:text('expires_at').notNull(),usedBy:text('used_by'),createdAt:text('created_at').notNull(),
+},t=>[primaryKey({columns:[t.ownerId,t.id]}),check('delivery_preflights_data_json',sql`json_valid(${t.data})`)]);
+export const deliveryAttempts=sqliteTable('delivery_attempts',{
+ ownerId:text('owner_id').notNull(),operationId:text('operation_id').notNull(),sourceId:text('source_id').notNull(),externalId:text('external_id').notNull(),
+ revision:integer('revision').notNull(),preflightId:text('preflight_id').notNull(),requestHash:text('request_hash').notNull(),data:text('data').notNull(),
+},t=>[primaryKey({columns:[t.ownerId,t.operationId]}),check('delivery_attempts_data_json',sql`json_valid(${t.data})`),uniqueIndex('delivery_attempt_order_revision').on(t.ownerId,t.sourceId,t.externalId,t.revision),uniqueIndex('delivery_attempt_preflight').on(t.ownerId,t.preflightId)]);
+export {platformMessages,inboxSyncState,mailProviderProvenance} from './inbox-schema';
